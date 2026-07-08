@@ -156,7 +156,8 @@
         <h2 style="font-size:14px;margin-top:12px">回撤曲线</h2>
         <canvas id="ddChart" height="180"></canvas>
         <h2 style="font-size:14px;margin-top:14px">单资产表现</h2>
-        <table id="assetPerf"><thead><tr><th>资产</th><th>金额(万)</th><th>年化收益</th><th>年化波动</th><th>最大回撤</th><th>期末价值(万)</th><th>盈亏(万)</th></tr></thead><tbody></tbody></table>
+        <table id="assetPerf"><thead><tr><th>资产</th><th>金额(万)</th><th>年化收益</th><th>累计收益</th><th>年化波动</th><th>最大回撤</th><th>期末价值(万)</th><th>盈亏(万)</th></tr></thead><tbody></tbody></table>
+        <div class="foot">注:单资产表按「该笔金额独立买入持有」计算,不含再平衡调仓的影响;组合总指标(上方卡片)才包含再平衡效应,因此单资产期末价值之和不一定等于组合期末价值。</div>
         <div class="foot" id="btNote" style="white-space:pre-line"></div>
       </div>
 
@@ -457,7 +458,7 @@ async function runBacktest() {
     const amounts = assets.map(a => +a.amount);
     const totalAmt = amounts.reduce((s,x)=>s+x,0);
     let units = assets.map((a,i) => amounts[i] / px[i][0]);
-    const nav = [], perAssetVal = assets.map(()=>[]);
+    const nav = [];
     const periodKey = d => rebalance==='monthly' ? d.slice(0,7)
       : rebalance==='quarterly' ? d.slice(0,4)+'Q'+Math.ceil(+d.slice(5,7)/3)
       : rebalance==='yearly' ? d.slice(0,4) : 'x';
@@ -472,7 +473,7 @@ async function runBacktest() {
         }
       }
       let v = 0;
-      for (let i = 0; i < assets.length; i++) { const av = units[i]*px[i][t]; v += av; perAssetVal[i].push(av); }
+      for (let i = 0; i < assets.length; i++) v += units[i]*px[i][t];
       nav.push(v);
     }
 
@@ -497,7 +498,7 @@ async function runBacktest() {
     const sharpe = vol > 0 ? (cagr - rf)/vol : 0;
     const calmar = mdd < 0 ? cagr/Math.abs(mdd) : 0;
 
-    // 6) 单资产指标
+    // 6) 单资产指标 — 统一用「独立买入持有」口径, 避免与再平衡后的仓位价值混淆
     const assetPerf = assets.map((a,i) => {
       const s = px[i];
       const aCagr = Math.pow(s[n-1]/s[0], 1/years) - 1;
@@ -506,8 +507,8 @@ async function runBacktest() {
       const aVol = Math.sqrt(aRets.reduce((x,y)=>x+(y-am)*(y-am),0)/(aRets.length-1))*Math.sqrt(freq);
       let ap = s[0], amdd = 0;
       for (let t=0;t<n;t++){ if(s[t]>ap)ap=s[t]; amdd=Math.min(amdd,s[t]/ap-1); }
-      const endVal = perAssetVal[i][n-1];
-      return { name:a.name, amount:amounts[i], cagr:aCagr, vol:aVol, mdd:amdd, endVal, pnl:endVal-amounts[i] };
+      const endVal = amounts[i] * (s[n-1] / s[0]); // 该笔钱单独持有到期末的价值
+      return { name:a.name, amount:amounts[i], cagr:aCagr, vol:aVol, mdd:amdd, cum:s[n-1]/s[0]-1, endVal, pnl:endVal-amounts[i] };
     });
 
     lastResult = { dates, nav, ddSeries, cum, cagr, vol, mdd, mddStart, mddEnd, sharpe, calmar, years, assetPerf, totalAmt, rebalance, rf, lateAssets, degraded };
@@ -541,7 +542,7 @@ function renderResults() {
     `<div class="metric"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
   document.querySelector('#assetPerf tbody').innerHTML = R.assetPerf.map(a => `
     <tr><td>${a.name}</td><td>${a.amount}</td>
-    <td class="${cls(a.cagr)}">${fmtPct(a.cagr)}</td><td>${fmtPct(a.vol)}</td>
+    <td class="${cls(a.cagr)}">${fmtPct(a.cagr)}</td><td class="${cls(a.cum)}">${fmtPct(a.cum)}</td><td>${fmtPct(a.vol)}</td>
     <td class="neg">${fmtPct(a.mdd)}</td><td>${a.endVal.toFixed(0)}</td>
     <td class="${cls(a.pnl)}">${a.pnl>=0?'+':''}${a.pnl.toFixed(0)}</td></tr>`).join('');
   let warn = '';
@@ -602,9 +603,10 @@ function exportCSV() {
   csv += `累计收益,${fmtPct(R.cum)}\n年化收益率,${fmtPct(R.cagr)}\n年化波动率,${fmtPct(R.vol)}\n`;
   csv += `最大回撤,${fmtPct(R.mdd)}\n最大回撤区间,${R.mddStart} → ${R.mddEnd}\n`;
   csv += `夏普比率,${R.sharpe.toFixed(2)}\n卡玛比率,${R.calmar.toFixed(2)}\n\n`;
-  csv += '资产,金额(万),年化收益,年化波动,最大回撤,期末价值(万),盈亏(万)\n';
+  csv += '单资产表现(独立买入持有口径,不含再平衡影响)\n';
+  csv += '资产,金额(万),年化收益,累计收益,年化波动,最大回撤,期末价值(万),盈亏(万)\n';
   R.assetPerf.forEach(a => {
-    csv += `${a.name},${a.amount},${fmtPct(a.cagr)},${fmtPct(a.vol)},${fmtPct(a.mdd)},${a.endVal.toFixed(0)},${a.pnl.toFixed(0)}\n`;
+    csv += `${a.name},${a.amount},${fmtPct(a.cagr)},${fmtPct(a.cum)},${fmtPct(a.vol)},${fmtPct(a.mdd)},${a.endVal.toFixed(0)},${a.pnl.toFixed(0)}\n`;
   });
   csv += '\n日期,组合净值(万港元),回撤\n';
   R.dates.forEach((d,i) => { csv += `${d},${R.nav[i].toFixed(2)},${fmtPct(R.ddSeries[i])}\n`; });
