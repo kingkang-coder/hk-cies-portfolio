@@ -157,7 +157,7 @@
         <canvas id="ddChart" height="180"></canvas>
         <h2 style="font-size:14px;margin-top:14px">单资产表现</h2>
         <table id="assetPerf"><thead><tr><th>资产</th><th>金额(万)</th><th>年化收益</th><th>年化波动</th><th>最大回撤</th><th>期末价值(万)</th><th>盈亏(万)</th></tr></thead><tbody></tbody></table>
-        <div class="foot" id="btNote"></div>
+        <div class="foot" id="btNote" style="white-space:pre-line"></div>
       </div>
 
       <div class="foot">
@@ -200,12 +200,12 @@ const LIBRARY = [
   { g:'ETF·公募', name:'安硕恒生科技ETF', code:'hk03067', cies:'cis' },
   { g:'ETF·公募', name:'安硕富时中国A50', code:'hk02823', cies:'cis' },
   { g:'ETF·公募', name:'华夏沪深300ETF', code:'hk03188', cies:'cis' },
-  { g:'ETF·公募', name:'恒生高股息率ETF', code:'hk03110', cies:'cis' },
+  { g:'ETF·公募', name:'GX恒生高股息率ETF', code:'hk03110', cies:'cis' },
   { g:'ETF·公募', name:'SPDR金ETF', code:'hk02840', cies:'cis' },
   { g:'ETF·公募', name:'价值黄金ETF', code:'hk03081', cies:'cis' },
   // —— 债券/货币类(获许:债务证券或集体投资计划) ——
-  { g:'债券·货币', name:'ABF香港创富债券基金', code:'hk02819', cies:'cis', note:'港债ETF' },
-  { g:'债券·货币', name:'南方中国国债ETF', code:'hk03199', cies:'cis', note:'国债ETF' },
+  { g:'债券·货币', name:'ABF港债指数基金', code:'hk02819', cies:'cis', note:'港债ETF' },
+  { g:'债券·货币', name:'工银南方东英国债ETF', code:'hk03199', cies:'cis', note:'中国国债ETF' },
   { g:'债券·货币', name:'南方港元货币市场ETF', code:'hk03053', cies:'cis', note:'货币基金' },
   { g:'债券·货币', name:'政府债券/iBond/绿债(假设)', fixed:4.0, cies:'bond', note:'固定收益模拟' },
   { g:'债券·货币', name:'港上市公司债(假设)', fixed:5.0, cies:'bond', note:'固定收益模拟' },
@@ -263,7 +263,9 @@ function renderCompliance(total) {
   const cd = sum('cd'), pe = sum('pe'), res = sum('re_res'), nonres = sum('re_nonres');
   const reCounted = Math.min(Math.min(res,1000) + nonres, 1500);
   const fin = total - 300 - res - nonres; // 金融资产
-  const counted = 300 + fin + reCounted;
+  // 存款证/私募超出上限的部分不计入
+  const finCounted = fin - Math.max(0, cd - 300) - Math.max(0, pe - 1000);
+  const counted = 300 + finCounted + reCounted;
   const checks = [
     { ok: counted >= 3000, txt: `计入总额 ${counted.toLocaleString()} 万 / 需≥3,000万` },
     { ok: true, txt: `计划投资组合 300万(强制)✓` },
@@ -320,31 +322,35 @@ function loadPreset(k) {
 /* ================= 回测引擎 ================= */
 let lastResult = null;
 
-// 浏览器直连腾讯行情(接口开放CORS), 单次上限约800条, 按结束日期往回翻页
-async function fetchKlinePage(code, end) {
-  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${code},day,,${end || ''},640,qfq`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`行情接口 HTTP ${r.status}`);
-  const j = await r.json();
-  if (j.code !== 0 || !j.data || Array.isArray(j.data)) throw new Error(j.msg || '行情接口异常');
-  const k = Object.keys(j.data)[0];
-  const rows = j.data[k].qfqday || j.data[k].day || [];
-  return rows.map(x => [x[0], parseFloat(x[2])]).filter(x => isFinite(x[1]) && x[1] > 0);
+// 行情数据: 双源自动降级
+// 主源: 东方财富(fqt=1 真·前复权, 含分红/供股调整) — 收益最准确
+// 备源: 腾讯行情(不复权, 港股不支持复权) — 仅在主源不可用时降级, 并明确警告
+async function fetchJson(url, ms = 12000) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: ctl.signal });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } finally { clearTimeout(t); }
 }
 
-async function fetchSeries(code, start) {
-  // localStorage 当天缓存, 避免重复拉取
-  const key = 'kline_' + code, today = new Date().toISOString().slice(0, 10);
-  try {
-    const c = JSON.parse(localStorage.getItem(key));
-    if (c && c.d === today && c.s <= start) {
-      const rows = c.rows.filter(r => r[0] >= start);
-      if (rows.length >= 30) return rows;
-    }
-  } catch {}
+async function fetchEM(num, start) {
+  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=116.${num}&klt=101&fqt=1&beg=${start.replace(/-/g, '')}&end=20500101&fields1=f1,f2,f3&fields2=f51,f53&lmt=1000000`;
+  const j = await fetchJson(url);
+  const kl = (j.data && j.data.klines) || [];
+  return kl.map(s => { const p = s.split(','); return [p[0], parseFloat(p[1])]; })
+    .filter(x => isFinite(x[1]) && x[1] > 0);
+}
+
+async function fetchTX(code, start) {
   let all = [], end = '';
   for (let i = 0; i < 12; i++) {
-    const page = await fetchKlinePage(code, end);
+    const j = await fetchJson(`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${code},day,,${end || ''},640,qfq`);
+    if (j.code !== 0 || !j.data || Array.isArray(j.data)) throw new Error(j.msg || '行情接口异常');
+    const k = Object.keys(j.data)[0];
+    const page = (j.data[k].qfqday || j.data[k].day || [])
+      .map(x => [x[0], parseFloat(x[2])]).filter(x => isFinite(x[1]) && x[1] > 0);
     if (!page.length) break;
     all = page.concat(all.filter(r => r[0] > page[page.length - 1][0]));
     if (page[0][0] <= start || page.length < 640) break;
@@ -353,10 +359,34 @@ async function fetchSeries(code, start) {
     end = d.toISOString().slice(0, 10);
   }
   const map = new Map(all.map(r => [r[0], r[1]]));
-  const rows = [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
-  if (rows.length < 30) throw new Error(`${code}: 数据不足(${rows.length}条)`);
-  try { localStorage.setItem(key, JSON.stringify({ d: today, s: rows[0][0], rows })); } catch {}
-  return rows.filter(r => r[0] >= start);
+  return [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).filter(r => r[0] >= start);
+}
+
+// 熔断: 东财失败一次后, 本轮回测剩余资产直接走备源, 不再空等超时
+let emCircuitOpen = false;
+
+// 返回 { rows, src } — src: 'em'=前复权(准) | 'tx'=不复权(降级)
+async function fetchSeries(code, start) {
+  const num = code.replace('hk', '');
+  const key = 'k2_' + num, today = new Date().toISOString().slice(0, 10);
+  try {
+    const c = JSON.parse(localStorage.getItem(key));
+    if (c && c.d === today && c.from <= start) {
+      const rows = c.rows.filter(r => r[0] >= start);
+      if (rows.length >= 30) return { rows, src: c.src };
+    }
+  } catch {}
+  let rows = null, src;
+  if (!emCircuitOpen) {
+    try { rows = await fetchEM(num, start); src = 'em'; } catch (e) { emCircuitOpen = true; }
+  }
+  if (!rows || rows.length < 30) {
+    rows = await fetchTX(code, start); src = 'tx';
+  }
+  if (!rows || rows.length < 30) throw new Error(`${code}: 数据不足(${rows ? rows.length : 0}条)`);
+  try { localStorage.setItem(key, JSON.stringify({ d: today, from: start, src, rows })); }
+  catch { try { for (const k in localStorage) if (k.startsWith('k2_')) localStorage.removeItem(k); } catch {} }
+  return { rows, src };
 }
 
 function dayDiff(d1, d2) { return (new Date(d2) - new Date(d1)) / 86400000; }
@@ -369,26 +399,37 @@ async function runBacktest() {
   const rebalance = document.getElementById('rebalance').value;
   const rf = (+document.getElementById('rf').value || 0) / 100;
   btn.disabled = true;
+  emCircuitOpen = false; // 每轮回测重新尝试主行情源
 
   try {
     // 1) 拉行情
     const marketAssets = assets.filter(a => a.code);
     const seriesMap = {};
+    const degraded = [];
     for (let i = 0; i < marketAssets.length; i++) {
       st.textContent = `拉取行情 ${i+1}/${marketAssets.length}: ${marketAssets[i].name}…`;
-      seriesMap[marketAssets[i].code] = await fetchSeries(marketAssets[i].code, start);
+      const { rows, src } = await fetchSeries(marketAssets[i].code, start);
+      seriesMap[marketAssets[i].code] = rows;
+      if (src === 'tx') degraded.push(marketAssets[i].name);
     }
     st.textContent = '计算中…';
 
     // 2) 主日历: 行情日期并集; 纯固定收益组合则生成周频日历
     let dates;
+    const lateAssets = [];
     if (marketAssets.length) {
       const set = new Set();
       Object.values(seriesMap).forEach(rows => rows.forEach(r => set.add(r[0])));
       dates = [...set].sort();
-      // 从所有资产都有数据的那天开始
+      // 从所有资产都有数据的那天开始; 记下哪些资产历史不足(上市晚于回测起点45天以上)
       const firstCommon = marketAssets.map(a => seriesMap[a.code][0][0]).sort().pop();
       dates = dates.filter(d => d >= firstCommon);
+      const tol = new Date(start); tol.setDate(tol.getDate() + 45);
+      const tolStr = tol.toISOString().slice(0, 10);
+      for (const a of marketAssets) {
+        const first = seriesMap[a.code][0][0];
+        if (first > tolStr) lateAssets.push(`${a.name}(数据始于${first})`);
+      }
     } else {
       dates = [];
       const today = new Date();
@@ -469,7 +510,7 @@ async function runBacktest() {
       return { name:a.name, amount:amounts[i], cagr:aCagr, vol:aVol, mdd:amdd, endVal, pnl:endVal-amounts[i] };
     });
 
-    lastResult = { dates, nav, ddSeries, cum, cagr, vol, mdd, mddStart, mddEnd, sharpe, calmar, years, assetPerf, totalAmt, rebalance, rf };
+    lastResult = { dates, nav, ddSeries, cum, cagr, vol, mdd, mddStart, mddEnd, sharpe, calmar, years, assetPerf, totalAmt, rebalance, rf, lateAssets, degraded };
     renderResults();
     st.textContent = '';
   } catch (e) {
@@ -493,8 +534,8 @@ function renderResults() {
     ['年化收益率', fmtPct(R.cagr), cls(R.cagr)],
     ['年化波动率', fmtPct(R.vol), ''],
     ['最大回撤', fmtPct(R.mdd), 'neg'],
-    ['夏普比率', R.sharpe.toFixed(2), cls(R.sharpe)],
-    ['卡玛比率', R.calmar.toFixed(2), cls(R.calmar)],
+    ['夏普比率', R.vol > 1e-6 ? R.sharpe.toFixed(2) : '—', R.vol > 1e-6 ? cls(R.sharpe) : ''],
+    ['卡玛比率', R.mdd < -1e-9 ? R.calmar.toFixed(2) : '—', R.mdd < -1e-9 ? cls(R.calmar) : ''],
   ];
   document.getElementById('metricCards').innerHTML = cards.map(([k,v,c]) =>
     `<div class="metric"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
@@ -503,8 +544,16 @@ function renderResults() {
     <td class="${cls(a.cagr)}">${fmtPct(a.cagr)}</td><td>${fmtPct(a.vol)}</td>
     <td class="neg">${fmtPct(a.mdd)}</td><td>${a.endVal.toFixed(0)}</td>
     <td class="${cls(a.pnl)}">${a.pnl>=0?'+':''}${a.pnl.toFixed(0)}</td></tr>`).join('');
-  document.getElementById('btNote').textContent =
-    `回测区间 ${R.dates[0]} ~ ${R.dates[R.dates.length-1]}(${R.years.toFixed(1)}年) · 再平衡: ${{none:'买入持有',monthly:'每月',quarterly:'每季',yearly:'每年'}[R.rebalance]} · 最大回撤区间 ${R.mddStart} → ${R.mddEnd} · 行情为前复权收盘价(含分红再投资近似) · 固定收益类资产按假设年化匀速增长模拟`;
+  let warn = '';
+  if (R.lateAssets && R.lateAssets.length)
+    warn += `⚠️ 注意: ${R.lateAssets.join('、')} 历史不足,整个组合的回测实际从 ${R.dates[0]} 才开始,早于该日的行情未参与计算。\n`;
+  if (R.degraded && R.degraded.length)
+    warn += `⚠️ 主行情源(东方财富)暂不可用,以下资产降级用了不复权数据,收益未含分红、会偏低: ${R.degraded.join('、')}。建议稍后重试。\n`;
+  const srcNote = R.degraded && R.degraded.length
+    ? '行情源: 部分降级(见上方警告)'
+    : '行情为东方财富前复权收盘价(已含分红/供股调整)';
+  document.getElementById('btNote').textContent = warn +
+    `回测区间 ${R.dates[0]} ~ ${R.dates[R.dates.length-1]}(${R.years.toFixed(1)}年) · 再平衡: ${{none:'买入持有',monthly:'每月',quarterly:'每季',yearly:'每年'}[R.rebalance]} · 最大回撤区间 ${R.mddStart} → ${R.mddEnd} · ${srcNote} · 固定收益类资产按假设年化匀速增长模拟`;
   drawLine('navChart', R.dates, R.nav, { color:'#0f4c81', fill:'rgba(15,76,129,.08)', fmt: v=>Math.round(v).toLocaleString()+'万' });
   drawLine('ddChart', R.dates, R.ddSeries, { color:'#c0392b', fill:'rgba(192,57,43,.12)', fmt: v=>(v*100).toFixed(1)+'%', zeroTop:true });
 }
@@ -546,7 +595,7 @@ function drawLine(id, dates, ys, opt) {
 function exportCSV() {
   if (!lastResult) return;
   const R = lastResult;
-  let csv = '﻿';
+  let csv = '﻿'; // BOM, 防止Excel打开中文乱码
   csv += '香港新CIES投资组合回测报告\n';
   csv += `回测区间,${R.dates[0]} ~ ${R.dates[R.dates.length-1]}\n`;
   csv += `期初投入(万港元),${R.totalAmt}\n期末价值(万港元),${R.nav[R.nav.length-1].toFixed(1)}\n`;
