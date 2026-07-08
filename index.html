@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>香港新CIES投资组合规划器</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --card: #ffffff; --ink: #1a2332; --muted: #6b7686;
+    --line: #e3e8ef; --accent: #0f4c81; --accent2: #b8860b;
+    --good: #1a7f4e; --bad: #c0392b; --warn: #b8860b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--ink); font-size: 14px; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 20px; }
+  header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; flex-wrap: wrap; }
+  header h1 { font-size: 22px; color: var(--accent); }
+  header .sub { color: var(--muted); }
+  .rules { background: #eef4fb; border: 1px solid #d5e3f3; border-radius: 10px; padding: 10px 14px; margin: 10px 0 16px; font-size: 13px; line-height: 1.7; color: #33455c; }
+  .rules b { color: var(--accent); }
+  .grid { display: grid; grid-template-columns: 400px 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin-bottom: 10px; color: var(--accent); display: flex; align-items: center; justify-content: space-between; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .tabs button { border: 1px solid var(--line); background: #fff; border-radius: 20px; padding: 4px 12px; cursor: pointer; font-size: 13px; color: var(--muted); }
+  .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #search { width: 100%; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; font-size: 13px; }
+  .lib { max-height: 520px; overflow-y: auto; }
+  .lib-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 6px; border-bottom: 1px dashed var(--line); gap: 8px; }
+  .lib-item:hover { background: #f7fafc; }
+  .lib-item .nm { font-weight: 600; }
+  .lib-item .cd { color: var(--muted); font-size: 12px; }
+  .lib-item .note { color: var(--warn); font-size: 11px; }
+  .lib-item button { border: 1px solid var(--accent); color: var(--accent); background: #fff; border-radius: 6px; padding: 3px 10px; cursor: pointer; white-space: nowrap; }
+  .lib-item button:hover { background: var(--accent); color: #fff; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 7px 8px; text-align: left; border-bottom: 1px solid var(--line); font-size: 13px; }
+  th { color: var(--muted); font-weight: 500; background: #fafbfd; }
+  td input[type=number] { width: 90px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; text-align: right; }
+  .del { color: var(--bad); cursor: pointer; border: none; background: none; font-size: 15px; }
+  .tag { display: inline-block; font-size: 11px; border-radius: 4px; padding: 1px 6px; background: #eef2f7; color: #4a5a70; white-space: nowrap; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; }
+  .badge { border-radius: 8px; padding: 6px 10px; font-size: 12.5px; border: 1px solid; }
+  .badge.ok { color: var(--good); border-color: #bfe3d0; background: #effaf4; }
+  .badge.no { color: var(--bad); border-color: #eec7c0; background: #fdf1ef; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  .controls label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .controls input, .controls select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+  .btn { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 9px 20px; font-size: 14px; cursor: pointer; }
+  .btn:hover { opacity: .92; }
+  .btn.ghost { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
+  .btn.gold { background: var(--accent2); }
+  .btn:disabled { opacity: .5; cursor: wait; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .metric { background: #f8fafc; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .metric .v { font-size: 19px; font-weight: 700; margin-top: 2px; }
+  .metric .k { font-size: 12px; color: var(--muted); }
+  .pos { color: var(--good); } .neg { color: var(--bad); }
+  canvas { width: 100%; height: 280px; display: block; }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; }
+  .presets button { border: 1px dashed var(--accent2); color: var(--accent2); background: #fffdf5; border-radius: 8px; padding: 5px 12px; cursor: pointer; font-size: 13px; }
+  .foot { color: var(--muted); font-size: 12px; line-height: 1.7; margin-top: 8px; }
+  #status { font-size: 13px; color: var(--muted); margin-left: 10px; }
+  .hidden { display: none; }
+  @media print {
+    .no-print, .lib, #search, .tabs { display: none !important; }
+    .grid { grid-template-columns: 1fr; }
+    body { background: #fff; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🇭🇰 香港新CIES投资组合规划器</h1>
+    <span class="sub">新资本投资者入境计划 · 获许资产自由搭配 · 历史回测 · 指标导出</span>
+  </header>
+
+  <div class="rules">
+    <b>规则速览(2026年3月最新优化后):</b>
+    总投资 ≥ <b>3,000万港元</b> = <b>300万</b> 强制投入「资本投资者入境计划投资组合」(港投公司管理,不可选) + <b>≥2,700万</b> 自由配置于获许资产。
+    获许金融资产:港交所上市<b>股票</b>、<b>债务证券</b>(港上市债券/政府债/iBond等)、<b>存款证</b>(上限300万,须12个月以上)、<b>后偿债项</b>、<b>合资格集体投资计划</b>(证监会认可基金/港上市ETF/REITs/投连险)、<b>私募基金</b>(SFC持牌管理的OFC/LPF,上限1,000万)。
+    <b>房地产</b>:住宅+非住宅合计上限1,500万计入,其中住宅上限1,000万。获批后组合市值下跌<b>无需补仓</b>,但卖出须把全部所得再投资于获许资产。
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="card no-print">
+        <h2>📚 获许资产库 <span style="font-weight:normal;font-size:12px;color:var(--muted)">点击添加到组合</span></h2>
+        <input id="search" placeholder="搜索名称或代码…">
+        <div class="tabs" id="tabs"></div>
+        <div class="lib" id="lib"></div>
+      </div>
+      <div class="card no-print">
+        <h2>⚡ 一键示例组合</h2>
+        <div class="presets">
+          <button onclick="loadPreset('steady')">🛡 稳健型(股3债5)</button>
+          <button onclick="loadPreset('balanced')">⚖️ 平衡型(股5债3)</button>
+          <button onclick="loadPreset('growth')">🚀 进取型(股7)</button>
+          <button onclick="clearPortfolio()">🗑 清空</button>
+        </div>
+        <div class="foot">示例仅为演示搭配方式,非投资建议。金额单位均为「万港元」。</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>💼 我的组合
+          <span class="no-print">
+            <button class="btn ghost" style="padding:4px 12px;font-size:12px" onclick="exportConfig()">导出配置</button>
+            <button class="btn ghost" style="padding:4px 12px;font-size:12px" onclick="document.getElementById('importFile').click()">导入配置</button>
+            <input type="file" id="importFile" class="hidden" accept=".json" onchange="importConfig(this)">
+          </span>
+        </h2>
+        <table id="ptable">
+          <thead><tr><th>资产</th><th>CIES类别</th><th>金额(万)</th><th>占比</th><th>假设年化</th><th class="no-print"></th></tr></thead>
+          <tbody id="pbody"></tbody>
+          <tfoot><tr><th>合计</th><th></th><th id="totalAmt">0</th><th>100%</th><th></th><th class="no-print"></th></tr></tfoot>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>✅ CIES 合规检查</h2>
+        <div class="badges" id="badges"></div>
+      </div>
+
+      <div class="card no-print">
+        <h2>🔬 回测设置</h2>
+        <div class="controls">
+          <label>回测起始日期 <input type="date" id="startDate"></label>
+          <label>再平衡频率
+            <select id="rebalance">
+              <option value="none">买入持有</option>
+              <option value="monthly">每月</option>
+              <option value="quarterly">每季</option>
+              <option value="yearly" selected>每年</option>
+            </select>
+          </label>
+          <label>无风险利率%(算夏普用) <input type="number" id="rf" value="3" step="0.1" style="width:80px"></label>
+          <button class="btn" id="runBtn" onclick="runBacktest()">▶ 运行回测</button>
+          <span id="status"></span>
+        </div>
+      </div>
+
+      <div class="card hidden" id="results">
+        <h2>📊 回测结果
+          <span class="no-print">
+            <button class="btn gold" style="padding:4px 12px;font-size:12px" onclick="exportCSV()">导出CSV</button>
+            <button class="btn ghost" style="padding:4px 12px;font-size:12px" onclick="window.print()">打印报告</button>
+          </span>
+        </h2>
+        <div class="metrics" id="metricCards"></div>
+        <h2 style="font-size:14px">组合净值走势(单位:万港元)</h2>
+        <canvas id="navChart" height="280"></canvas>
+        <h2 style="font-size:14px;margin-top:12px">回撤曲线</h2>
+        <canvas id="ddChart" height="180"></canvas>
+        <h2 style="font-size:14px;margin-top:14px">单资产表现</h2>
+        <table id="assetPerf"><thead><tr><th>资产</th><th>金额(万)</th><th>年化收益</th><th>年化波动</th><th>最大回撤</th><th>期末价值(万)</th><th>盈亏(万)</th></tr></thead><tbody></tbody></table>
+        <div class="foot" id="btNote"></div>
+      </div>
+
+      <div class="foot">
+        ⚠️ 免责声明:历史收益不代表未来表现。资产是否合资格以投资推广署《获许投资资产声明》及持牌中介确认为准(尤其个别ETF/基金的SFC认可状态)。私募基金、存款证、房地产无公开日频行情,回测中按「假设年化收益」匀速增长模拟。本工具仅作规划参考,不构成投资建议。
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================= 资产库 ================= */
+// type: market=有行情(腾讯API代码) | fixed=固定假设收益
+// cies: stock股票 | cis集体投资计划 | bond债务证券 | cd存款证 | pe私募 | re_res住宅 | re_nonres非住宅 | ciesip计划组合
+const LIBRARY = [
+  // —— 港交所上市股票(获许:股票) ——
+  { g:'股票', name:'腾讯控股', code:'hk00700', cies:'stock' },
+  { g:'股票', name:'阿里巴巴-W', code:'hk09988', cies:'stock' },
+  { g:'股票', name:'美团-W', code:'hk03690', cies:'stock' },
+  { g:'股票', name:'小米集团-W', code:'hk01810', cies:'stock' },
+  { g:'股票', name:'中国移动', code:'hk00941', cies:'stock' },
+  { g:'股票', name:'汇丰控股', code:'hk00005', cies:'stock' },
+  { g:'股票', name:'友邦保险', code:'hk01299', cies:'stock' },
+  { g:'股票', name:'香港交易所', code:'hk00388', cies:'stock' },
+  { g:'股票', name:'建设银行', code:'hk00939', cies:'stock' },
+  { g:'股票', name:'工商银行', code:'hk01398', cies:'stock' },
+  { g:'股票', name:'中国平安', code:'hk02318', cies:'stock' },
+  { g:'股票', name:'中国海洋石油', code:'hk00883', cies:'stock' },
+  { g:'股票', name:'比亚迪股份', code:'hk01211', cies:'stock' },
+  { g:'股票', name:'新鸿基地产', code:'hk00016', cies:'stock' },
+  { g:'股票', name:'中电控股', code:'hk00002', cies:'stock' },
+  { g:'股票', name:'香港中华煤气', code:'hk00003', cies:'stock' },
+  { g:'股票', name:'港铁公司', code:'hk00066', cies:'stock' },
+  { g:'股票', name:'安踏体育', code:'hk02020', cies:'stock' },
+  { g:'股票', name:'京东集团-SW', code:'hk09618', cies:'stock' },
+  { g:'股票', name:'网易-S', code:'hk09999', cies:'stock' },
+  // —— 港上市ETF(获许:合资格集体投资计划,SFC认可) ——
+  { g:'ETF·公募', name:'盈富基金(恒生指数)', code:'hk02800', cies:'cis' },
+  { g:'ETF·公募', name:'恒生中国企业ETF', code:'hk02828', cies:'cis' },
+  { g:'ETF·公募', name:'南方恒生科技ETF', code:'hk03033', cies:'cis' },
+  { g:'ETF·公募', name:'安硕恒生科技ETF', code:'hk03067', cies:'cis' },
+  { g:'ETF·公募', name:'安硕富时中国A50', code:'hk02823', cies:'cis' },
+  { g:'ETF·公募', name:'华夏沪深300ETF', code:'hk03188', cies:'cis' },
+  { g:'ETF·公募', name:'恒生高股息率ETF', code:'hk03110', cies:'cis' },
+  { g:'ETF·公募', name:'SPDR金ETF', code:'hk02840', cies:'cis' },
+  { g:'ETF·公募', name:'价值黄金ETF', code:'hk03081', cies:'cis' },
+  // —— 债券/货币类(获许:债务证券或集体投资计划) ——
+  { g:'债券·货币', name:'ABF香港创富债券基金', code:'hk02819', cies:'cis', note:'港债ETF' },
+  { g:'债券·货币', name:'南方中国国债ETF', code:'hk03199', cies:'cis', note:'国债ETF' },
+  { g:'债券·货币', name:'南方港元货币市场ETF', code:'hk03053', cies:'cis', note:'货币基金' },
+  { g:'债券·货币', name:'政府债券/iBond/绿债(假设)', fixed:4.0, cies:'bond', note:'固定收益模拟' },
+  { g:'债券·货币', name:'港上市公司债(假设)', fixed:5.0, cies:'bond', note:'固定收益模拟' },
+  { g:'债券·货币', name:'存款证CD(假设,上限300万)', fixed:3.8, cies:'cd', note:'≥12个月' },
+  // —— REITs(获许:集体投资计划) ——
+  { g:'REITs', name:'领展房产基金', code:'hk00823', cies:'cis' },
+  { g:'REITs', name:'置富产业信托', code:'hk00778', cies:'cis' },
+  { g:'REITs', name:'阳光房地产基金', code:'hk00435', cies:'cis' },
+  { g:'REITs', name:'越秀房产信托基金', code:'hk00405', cies:'cis' },
+  // —— 无公开行情,按假设年化模拟 ——
+  { g:'私募·另类', name:'私募基金OFC/LPF(假设,上限1000万)', fixed:8.0, cies:'pe', note:'SFC持牌管理' },
+  { g:'私募·另类', name:'非住宅房地产(假设)', fixed:3.0, cies:'re_nonres', note:'与住宅合计≤1500万' },
+  { g:'私募·另类', name:'住宅房地产(假设,计入上限1000万)', fixed:2.0, cies:'re_res', note:'' },
+  { g:'私募·另类', name:'自定义固定收益资产', fixed:5.0, cies:'bond', note:'收益率可改' },
+];
+const CIES_LABEL = { stock:'股票', cis:'集体投资计划', bond:'债务证券', cd:'存款证', pe:'私募OFC/LPF', re_res:'住宅房地产', re_nonres:'非住宅房地产', ciesip:'计划投资组合' };
+
+/* ================= 组合状态 ================= */
+let portfolio = []; // {uid, name, code?, fixed?, cies, amount}
+let uidSeq = 1;
+const CIESIP = { uid:0, name:'资本投资者入境计划投资组合(港投公司,强制)', fixed:4.0, cies:'ciesip', amount:300, locked:true };
+portfolio.push({...CIESIP});
+
+function addAsset(libIdx) {
+  const a = LIBRARY[libIdx];
+  const exist = portfolio.find(p => p.code && p.code === a.code && a.code);
+  if (exist && a.code) { exist.amount += 100; renderPortfolio(); return; }
+  portfolio.push({ uid: uidSeq++, name: a.name, code: a.code || null, fixed: a.fixed ?? null, cies: a.cies, amount: 100 });
+  renderPortfolio();
+}
+function removeAsset(uid) { portfolio = portfolio.filter(p => p.uid !== uid); renderPortfolio(); }
+function clearPortfolio() { portfolio = [{...CIESIP}]; renderPortfolio(); }
+
+function renderPortfolio() {
+  const tb = document.getElementById('pbody');
+  const total = portfolio.reduce((s,p)=>s+(+p.amount||0),0);
+  tb.innerHTML = portfolio.map(p => `
+    <tr>
+      <td>${p.locked?'🔒 ':''}${p.name}${p.code?` <span class="cd">${p.code.replace('hk','')}</span>`:''}</td>
+      <td><span class="tag">${CIES_LABEL[p.cies]||p.cies}</span></td>
+      <td><input type="number" min="0" step="10" value="${p.amount}" ${p.locked?'disabled':''} onchange="updAmt(${p.uid},this.value)"></td>
+      <td>${total?((+p.amount||0)/total*100).toFixed(1):'0'}%</td>
+      <td>${p.fixed!=null?`<input type="number" step="0.1" value="${p.fixed}" style="width:60px" onchange="updRate(${p.uid},this.value)">%`:'<span class="cd">按行情</span>'}</td>
+      <td class="no-print">${p.locked?'':`<button class="del" onclick="removeAsset(${p.uid})">✕</button>`}</td>
+    </tr>`).join('');
+  document.getElementById('totalAmt').textContent = total.toLocaleString();
+  renderCompliance(total);
+}
+function updAmt(uid, v) { const p = portfolio.find(x=>x.uid===uid); if(p){p.amount=Math.max(0,+v||0);} renderPortfolio(); }
+function updRate(uid, v) { const p = portfolio.find(x=>x.uid===uid); if(p){p.fixed=+v||0;} }
+
+/* ================= 合规检查 ================= */
+function renderCompliance(total) {
+  const sum = c => portfolio.filter(p=>p.cies===c).reduce((s,p)=>s+(+p.amount||0),0);
+  const cd = sum('cd'), pe = sum('pe'), res = sum('re_res'), nonres = sum('re_nonres');
+  const reCounted = Math.min(Math.min(res,1000) + nonres, 1500);
+  const fin = total - 300 - res - nonres; // 金融资产
+  const counted = 300 + fin + reCounted;
+  const checks = [
+    { ok: counted >= 3000, txt: `计入总额 ${counted.toLocaleString()} 万 / 需≥3,000万` },
+    { ok: true, txt: `计划投资组合 300万(强制)✓` },
+    { ok: cd <= 300, txt: `存款证 ${cd} 万 / 上限300万` },
+    { ok: pe <= 1000, txt: `私募OFC/LPF ${pe} 万 / 上限1,000万` },
+    { ok: res <= 1000 || res===Math.min(res,1000), txt: `住宅房地产 ${res} 万,计入 ${Math.min(res,1000)} 万(上限1,000万)`, warn: res>1000 },
+    { ok: res+nonres <= 1500 || true, txt: `房地产合计 ${res+nonres} 万,计入 ${reCounted} 万(上限1,500万)`, warn: res+nonres>1500 },
+  ];
+  document.getElementById('badges').innerHTML = checks.map(c =>
+    `<span class="badge ${c.ok&&!c.warn?'ok':'no'}">${c.ok&&!c.warn?'✅':'⚠️'} ${c.txt}</span>`).join('');
+}
+
+/* ================= 资产库渲染 ================= */
+let curTab = '全部';
+function renderTabs() {
+  const gs = ['全部', ...new Set(LIBRARY.map(a=>a.g))];
+  document.getElementById('tabs').innerHTML = gs.map(g =>
+    `<button class="${g===curTab?'on':''}" onclick="curTab='${g}';renderTabs();renderLib()">${g}</button>`).join('');
+}
+function renderLib() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  document.getElementById('lib').innerHTML = LIBRARY.map((a,i) => ({a,i}))
+    .filter(({a}) => (curTab==='全部'||a.g===curTab) && (!q || a.name.toLowerCase().includes(q) || (a.code||'').includes(q)))
+    .map(({a,i}) => `
+      <div class="lib-item">
+        <div>
+          <div class="nm">${a.name} ${a.code?`<span class="cd">${a.code.replace('hk','')}</span>`:''}</div>
+          <div class="cd"><span class="tag">${CIES_LABEL[a.cies]}</span> ${a.note?`<span class="note">${a.note}</span>`:''} ${a.fixed!=null?`<span class="note">假设年化${a.fixed}%</span>`:''}</div>
+        </div>
+        <button onclick="addAsset(${i})">＋ 添加</button>
+      </div>`).join('');
+}
+document.getElementById('search').addEventListener('input', renderLib);
+
+/* ================= 示例组合 ================= */
+const PRESETS = {
+  steady: [['hk02800',400],['hk03110',400],['hk02819',700],['hk03053',400],['hk02840',200],['hk00823',200],['CD',300],['GOV',100]],
+  balanced: [['hk02800',600],['hk03033',300],['hk02823',200],['hk03110',300],['hk02819',500],['hk02840',300],['hk00823',300],['CD',200]],
+  growth: [['hk00700',300],['hk02800',500],['hk03033',500],['hk03188',300],['hk09988',200],['hk02840',200],['hk02819',300],['PE',400]],
+};
+function loadPreset(k) {
+  portfolio = [{...CIESIP}];
+  for (const [key, amt] of PRESETS[k]) {
+    let a;
+    if (key==='CD') a = LIBRARY.find(x=>x.cies==='cd');
+    else if (key==='PE') a = LIBRARY.find(x=>x.cies==='pe');
+    else if (key==='GOV') a = LIBRARY.find(x=>x.cies==='bond'&&x.name.includes('政府'));
+    else a = LIBRARY.find(x=>x.code===key);
+    if (a) portfolio.push({ uid: uidSeq++, name:a.name, code:a.code||null, fixed:a.fixed??null, cies:a.cies, amount:amt });
+  }
+  renderPortfolio();
+}
+
+/* ================= 回测引擎 ================= */
+let lastResult = null;
+
+// 浏览器直连腾讯行情(接口开放CORS), 单次上限约800条, 按结束日期往回翻页
+async function fetchKlinePage(code, end) {
+  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${code},day,,${end || ''},640,qfq`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`行情接口 HTTP ${r.status}`);
+  const j = await r.json();
+  if (j.code !== 0 || !j.data || Array.isArray(j.data)) throw new Error(j.msg || '行情接口异常');
+  const k = Object.keys(j.data)[0];
+  const rows = j.data[k].qfqday || j.data[k].day || [];
+  return rows.map(x => [x[0], parseFloat(x[2])]).filter(x => isFinite(x[1]) && x[1] > 0);
+}
+
+async function fetchSeries(code, start) {
+  // localStorage 当天缓存, 避免重复拉取
+  const key = 'kline_' + code, today = new Date().toISOString().slice(0, 10);
+  try {
+    const c = JSON.parse(localStorage.getItem(key));
+    if (c && c.d === today && c.s <= start) {
+      const rows = c.rows.filter(r => r[0] >= start);
+      if (rows.length >= 30) return rows;
+    }
+  } catch {}
+  let all = [], end = '';
+  for (let i = 0; i < 12; i++) {
+    const page = await fetchKlinePage(code, end);
+    if (!page.length) break;
+    all = page.concat(all.filter(r => r[0] > page[page.length - 1][0]));
+    if (page[0][0] <= start || page.length < 640) break;
+    const d = new Date(page[0][0]);
+    d.setDate(d.getDate() - 1);
+    end = d.toISOString().slice(0, 10);
+  }
+  const map = new Map(all.map(r => [r[0], r[1]]));
+  const rows = [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  if (rows.length < 30) throw new Error(`${code}: 数据不足(${rows.length}条)`);
+  try { localStorage.setItem(key, JSON.stringify({ d: today, s: rows[0][0], rows })); } catch {}
+  return rows.filter(r => r[0] >= start);
+}
+
+function dayDiff(d1, d2) { return (new Date(d2) - new Date(d1)) / 86400000; }
+
+async function runBacktest() {
+  const btn = document.getElementById('runBtn'), st = document.getElementById('status');
+  const assets = portfolio.filter(p => (+p.amount||0) > 0);
+  if (assets.length < 1) { alert('请先添加资产'); return; }
+  const start = document.getElementById('startDate').value;
+  const rebalance = document.getElementById('rebalance').value;
+  const rf = (+document.getElementById('rf').value || 0) / 100;
+  btn.disabled = true;
+
+  try {
+    // 1) 拉行情
+    const marketAssets = assets.filter(a => a.code);
+    const seriesMap = {};
+    for (let i = 0; i < marketAssets.length; i++) {
+      st.textContent = `拉取行情 ${i+1}/${marketAssets.length}: ${marketAssets[i].name}…`;
+      seriesMap[marketAssets[i].code] = await fetchSeries(marketAssets[i].code, start);
+    }
+    st.textContent = '计算中…';
+
+    // 2) 主日历: 行情日期并集; 纯固定收益组合则生成周频日历
+    let dates;
+    if (marketAssets.length) {
+      const set = new Set();
+      Object.values(seriesMap).forEach(rows => rows.forEach(r => set.add(r[0])));
+      dates = [...set].sort();
+      // 从所有资产都有数据的那天开始
+      const firstCommon = marketAssets.map(a => seriesMap[a.code][0][0]).sort().pop();
+      dates = dates.filter(d => d >= firstCommon);
+    } else {
+      dates = [];
+      const today = new Date();
+      for (let d = new Date(start); d <= today; d.setDate(d.getDate()+7))
+        dates.push(d.toISOString().slice(0,10));
+    }
+    if (dates.length < 10) throw new Error('回测区间太短');
+
+    // 3) 每个资产的价格序列(定收益资产: (1+r)^(天数/365))
+    const px = assets.map(a => {
+      if (a.code) {
+        const rows = seriesMap[a.code];
+        let j = 0, last = null;
+        return dates.map(d => {
+          while (j < rows.length && rows[j][0] <= d) { last = rows[j][1]; j++; }
+          return last; // 向前填充
+        });
+      } else {
+        const r = (a.fixed||0)/100;
+        return dates.map(d => Math.pow(1+r, dayDiff(dates[0], d)/365));
+      }
+    });
+
+    // 4) 组合模拟: 初始按金额买入, 按频率再平衡
+    const amounts = assets.map(a => +a.amount);
+    const totalAmt = amounts.reduce((s,x)=>s+x,0);
+    let units = assets.map((a,i) => amounts[i] / px[i][0]);
+    const nav = [], perAssetVal = assets.map(()=>[]);
+    const periodKey = d => rebalance==='monthly' ? d.slice(0,7)
+      : rebalance==='quarterly' ? d.slice(0,4)+'Q'+Math.ceil(+d.slice(5,7)/3)
+      : rebalance==='yearly' ? d.slice(0,4) : 'x';
+    let curPeriod = periodKey(dates[0]);
+    for (let t = 0; t < dates.length; t++) {
+      if (rebalance!=='none' && t>0) {
+        const pk = periodKey(dates[t]);
+        if (pk !== curPeriod) {
+          curPeriod = pk;
+          const v = units.reduce((s,u,i)=>s+u*px[i][t],0);
+          units = assets.map((a,i) => (amounts[i]/totalAmt) * v / px[i][t]);
+        }
+      }
+      let v = 0;
+      for (let i = 0; i < assets.length; i++) { const av = units[i]*px[i][t]; v += av; perAssetVal[i].push(av); }
+      nav.push(v);
+    }
+
+    // 5) 指标
+    const n = dates.length;
+    const years = dayDiff(dates[0], dates[n-1]) / 365;
+    const rets = [];
+    for (let t = 1; t < n; t++) rets.push(nav[t]/nav[t-1]-1);
+    const cum = nav[n-1]/nav[0]-1;
+    const cagr = Math.pow(nav[n-1]/nav[0], 1/years) - 1;
+    const mean = rets.reduce((s,x)=>s+x,0)/rets.length;
+    const freq = marketAssets.length ? 252 : 52;
+    const vol = Math.sqrt(rets.reduce((s,x)=>s+(x-mean)*(x-mean),0)/(rets.length-1)) * Math.sqrt(freq);
+    let peak = nav[0], mdd = 0, mddStart = dates[0], mddEnd = dates[0], peakDate = dates[0];
+    const ddSeries = [];
+    for (let t = 0; t < n; t++) {
+      if (nav[t] > peak) { peak = nav[t]; peakDate = dates[t]; }
+      const dd = nav[t]/peak - 1;
+      ddSeries.push(dd);
+      if (dd < mdd) { mdd = dd; mddStart = peakDate; mddEnd = dates[t]; }
+    }
+    const sharpe = vol > 0 ? (cagr - rf)/vol : 0;
+    const calmar = mdd < 0 ? cagr/Math.abs(mdd) : 0;
+
+    // 6) 单资产指标
+    const assetPerf = assets.map((a,i) => {
+      const s = px[i];
+      const aCagr = Math.pow(s[n-1]/s[0], 1/years) - 1;
+      const aRets = []; for (let t=1;t<n;t++) aRets.push(s[t]/s[t-1]-1);
+      const am = aRets.reduce((x,y)=>x+y,0)/aRets.length;
+      const aVol = Math.sqrt(aRets.reduce((x,y)=>x+(y-am)*(y-am),0)/(aRets.length-1))*Math.sqrt(freq);
+      let ap = s[0], amdd = 0;
+      for (let t=0;t<n;t++){ if(s[t]>ap)ap=s[t]; amdd=Math.min(amdd,s[t]/ap-1); }
+      const endVal = perAssetVal[i][n-1];
+      return { name:a.name, amount:amounts[i], cagr:aCagr, vol:aVol, mdd:amdd, endVal, pnl:endVal-amounts[i] };
+    });
+
+    lastResult = { dates, nav, ddSeries, cum, cagr, vol, mdd, mddStart, mddEnd, sharpe, calmar, years, assetPerf, totalAmt, rebalance, rf };
+    renderResults();
+    st.textContent = '';
+  } catch (e) {
+    st.textContent = '';
+    alert('回测失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function fmtPct(x, d=2) { return (x*100).toFixed(d) + '%'; }
+function cls(x) { return x >= 0 ? 'pos' : 'neg'; }
+
+function renderResults() {
+  const R = lastResult;
+  document.getElementById('results').classList.remove('hidden');
+  const cards = [
+    ['期初投入', R.totalAmt.toLocaleString()+' 万', ''],
+    ['期末价值', Math.round(R.nav[R.nav.length-1]).toLocaleString()+' 万', cls(R.cum)],
+    ['累计收益', fmtPct(R.cum), cls(R.cum)],
+    ['年化收益率', fmtPct(R.cagr), cls(R.cagr)],
+    ['年化波动率', fmtPct(R.vol), ''],
+    ['最大回撤', fmtPct(R.mdd), 'neg'],
+    ['夏普比率', R.sharpe.toFixed(2), cls(R.sharpe)],
+    ['卡玛比率', R.calmar.toFixed(2), cls(R.calmar)],
+  ];
+  document.getElementById('metricCards').innerHTML = cards.map(([k,v,c]) =>
+    `<div class="metric"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
+  document.querySelector('#assetPerf tbody').innerHTML = R.assetPerf.map(a => `
+    <tr><td>${a.name}</td><td>${a.amount}</td>
+    <td class="${cls(a.cagr)}">${fmtPct(a.cagr)}</td><td>${fmtPct(a.vol)}</td>
+    <td class="neg">${fmtPct(a.mdd)}</td><td>${a.endVal.toFixed(0)}</td>
+    <td class="${cls(a.pnl)}">${a.pnl>=0?'+':''}${a.pnl.toFixed(0)}</td></tr>`).join('');
+  document.getElementById('btNote').textContent =
+    `回测区间 ${R.dates[0]} ~ ${R.dates[R.dates.length-1]}(${R.years.toFixed(1)}年) · 再平衡: ${{none:'买入持有',monthly:'每月',quarterly:'每季',yearly:'每年'}[R.rebalance]} · 最大回撤区间 ${R.mddStart} → ${R.mddEnd} · 行情为前复权收盘价(含分红再投资近似) · 固定收益类资产按假设年化匀速增长模拟`;
+  drawLine('navChart', R.dates, R.nav, { color:'#0f4c81', fill:'rgba(15,76,129,.08)', fmt: v=>Math.round(v).toLocaleString()+'万' });
+  drawLine('ddChart', R.dates, R.ddSeries, { color:'#c0392b', fill:'rgba(192,57,43,.12)', fmt: v=>(v*100).toFixed(1)+'%', zeroTop:true });
+}
+
+/* ================= 简易 canvas 图表 ================= */
+function drawLine(id, dates, ys, opt) {
+  const cv = document.getElementById(id);
+  const W = cv.clientWidth * devicePixelRatio, H = cv.getAttribute('height') * devicePixelRatio;
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  const padL = 70*devicePixelRatio, padR = 16*devicePixelRatio, padT = 12*devicePixelRatio, padB = 28*devicePixelRatio;
+  const ymin = Math.min(...ys), ymax = Math.max(...ys);
+  const span = (ymax-ymin)||1;
+  const X = i => padL + (W-padL-padR) * i/(ys.length-1);
+  const Y = v => padT + (H-padT-padB) * (1 - (v-(ymin-span*0.05))/(span*1.1));
+  ctx.font = `${11*devicePixelRatio}px sans-serif`;
+  ctx.strokeStyle = '#e3e8ef'; ctx.fillStyle = '#8a94a6'; ctx.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) {
+    const v = ymin + span*k/4, y = Y(v);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W-padR, y); ctx.stroke();
+    ctx.fillText(opt.fmt(v), 6*devicePixelRatio, y+4*devicePixelRatio);
+  }
+  const nTicks = Math.min(6, dates.length);
+  for (let k = 0; k < nTicks; k++) {
+    const i = Math.floor(k*(dates.length-1)/(nTicks-1));
+    ctx.fillText(dates[i], X(i)-30*devicePixelRatio, H-8*devicePixelRatio);
+  }
+  ctx.beginPath();
+  ys.forEach((v,i) => i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)));
+  ctx.strokeStyle = opt.color; ctx.lineWidth = 2*devicePixelRatio; ctx.stroke();
+  if (opt.fill) {
+    ctx.lineTo(X(ys.length-1), H-padB); ctx.lineTo(X(0), H-padB); ctx.closePath();
+    ctx.fillStyle = opt.fill; ctx.fill();
+  }
+}
+
+/* ================= 导出 ================= */
+function exportCSV() {
+  if (!lastResult) return;
+  const R = lastResult;
+  let csv = '﻿';
+  csv += '香港新CIES投资组合回测报告\n';
+  csv += `回测区间,${R.dates[0]} ~ ${R.dates[R.dates.length-1]}\n`;
+  csv += `期初投入(万港元),${R.totalAmt}\n期末价值(万港元),${R.nav[R.nav.length-1].toFixed(1)}\n`;
+  csv += `累计收益,${fmtPct(R.cum)}\n年化收益率,${fmtPct(R.cagr)}\n年化波动率,${fmtPct(R.vol)}\n`;
+  csv += `最大回撤,${fmtPct(R.mdd)}\n最大回撤区间,${R.mddStart} → ${R.mddEnd}\n`;
+  csv += `夏普比率,${R.sharpe.toFixed(2)}\n卡玛比率,${R.calmar.toFixed(2)}\n\n`;
+  csv += '资产,金额(万),年化收益,年化波动,最大回撤,期末价值(万),盈亏(万)\n';
+  R.assetPerf.forEach(a => {
+    csv += `${a.name},${a.amount},${fmtPct(a.cagr)},${fmtPct(a.vol)},${fmtPct(a.mdd)},${a.endVal.toFixed(0)},${a.pnl.toFixed(0)}\n`;
+  });
+  csv += '\n日期,组合净值(万港元),回撤\n';
+  R.dates.forEach((d,i) => { csv += `${d},${R.nav[i].toFixed(2)},${fmtPct(R.ddSeries[i])}\n`; });
+  download(csv, `CIES组合回测_${R.dates[R.dates.length-1]}.csv`, 'text/csv');
+}
+function exportConfig() {
+  download(JSON.stringify({ portfolio: portfolio.filter(p=>!p.locked) }, null, 2), 'CIES组合配置.json', 'application/json');
+}
+function importConfig(input) {
+  const f = input.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const j = JSON.parse(rd.result);
+      portfolio = [{...CIESIP}, ...j.portfolio.map(p => ({...p, uid: uidSeq++}))];
+      renderPortfolio();
+    } catch(e) { alert('配置文件格式不对'); }
+  };
+  rd.readAsText(f);
+  input.value = '';
+}
+function download(content, name, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type }));
+  a.download = name; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ================= 初始化 ================= */
+(function init(){
+  const d = new Date(); d.setFullYear(d.getFullYear()-5);
+  document.getElementById('startDate').value = d.toISOString().slice(0,10);
+  renderTabs(); renderLib(); renderPortfolio();
+})();
+</script>
+</body>
+</html>
