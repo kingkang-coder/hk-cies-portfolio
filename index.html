@@ -89,6 +89,14 @@
       <div class="card no-print">
         <h2>📚 获许资产库 <span style="font-weight:normal;font-size:12px;color:var(--muted)">点击添加到组合</span></h2>
         <input id="search" placeholder="搜索名称或代码…">
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <input id="customCode" placeholder="库里没有?输代码加任意港股, 例: 6690" style="flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">
+          <select id="customType" style="padding:6px;border:1px solid var(--line);border-radius:8px;font-size:12px">
+            <option value="stock">股票</option>
+            <option value="cis">ETF/REIT</option>
+          </select>
+          <button class="btn ghost" style="padding:6px 12px;font-size:13px" id="addCodeBtn" onclick="addByCode()">＋</button>
+        </div>
         <div class="tabs" id="tabs"></div>
         <div class="lib" id="lib"></div>
       </div>
@@ -194,6 +202,74 @@ const LIBRARY = [
   { g:'股票', name:'安踏体育', code:'hk02020', cies:'stock' },
   { g:'股票', name:'京东集团-SW', code:'hk09618', cies:'stock' },
   { g:'股票', name:'网易-S', code:'hk09999', cies:'stock' },
+  { g:'股票', name:'长和', code:'hk00001', cies:'stock' },
+  { g:'股票', name:'电能实业', code:'hk00006', cies:'stock' },
+  { g:'股票', name:'恒生银行', code:'hk00011', cies:'stock' },
+  { g:'股票', name:'恒基地产', code:'hk00012', cies:'stock' },
+  { g:'股票', name:'新世界发展', code:'hk00017', cies:'stock' },
+  { g:'股票', name:'太古股份公司A', code:'hk00019', cies:'stock' },
+  { g:'股票', name:'银河娱乐', code:'hk00027', cies:'stock' },
+  { g:'股票', name:'恒隆地产', code:'hk00101', cies:'stock' },
+  { g:'股票', name:'吉利汽车', code:'hk00175', cies:'stock' },
+  { g:'股票', name:'阿里健康', code:'hk00241', cies:'stock' },
+  { g:'股票', name:'中信股份', code:'hk00267', cies:'stock' },
+  { g:'股票', name:'金蝶国际', code:'hk00268', cies:'stock' },
+  { g:'股票', name:'比亚迪电子', code:'hk00285', cies:'stock' },
+  { g:'股票', name:'万洲国际', code:'hk00288', cies:'stock' },
+  { g:'股票', name:'华润啤酒', code:'hk00291', cies:'stock' },
+  { g:'股票', name:'康师傅控股', code:'hk00322', cies:'stock' },
+  { g:'股票', name:'中国石油化工股份', code:'hk00386', cies:'stock' },
+  { g:'股票', name:'ASMPT', code:'hk00522', cies:'stock' },
+  { g:'股票', name:'创科实业', code:'hk00669', cies:'stock' },
+  { g:'股票', name:'中国海外发展', code:'hk00688', cies:'stock' },
+  { g:'股票', name:'中国电信', code:'hk00728', cies:'stock' },
+  { g:'股票', name:'中国联通', code:'hk00762', cies:'stock' },
+  { g:'股票', name:'中国铁塔', code:'hk00788', cies:'stock' },
+  { g:'股票', name:'华润电力', code:'hk00836', cies:'stock' },
+  { g:'股票', name:'中国石油股份', code:'hk00857', cies:'stock' },
+  { g:'股票', name:'信义玻璃', code:'hk00868', cies:'stock' },
+  { g:'股票', name:'海螺水泥', code:'hk00914', cies:'stock' },
+  { g:'股票', name:'龙湖集团', code:'hk00960', cies:'stock' },
+  { g:'股票', name:'信义光能', code:'hk00968', cies:'stock' },
+  { g:'股票', name:'中芯国际', code:'hk00981', cies:'stock' },
+  { g:'股票', name:'联想集团', code:'hk00992', cies:'stock' },
+  { g:'股票', name:'快手-W', code:'hk01024', cies:'stock' },
+  { g:'股票', name:'长江基建集团', code:'hk01038', cies:'stock' },
+  { g:'股票', name:'中国神华', code:'hk01088', cies:'stock' },
+  { g:'股票', name:'石药集团', code:'hk01093', cies:'stock' },
+  { g:'股票', name:'华润置地', code:'hk01109', cies:'stock' },
+  { g:'股票', name:'长实集团', code:'hk01113', cies:'stock' },
+  { g:'股票', name:'中国生物制药', code:'hk01177', cies:'stock' },
+  { g:'股票', name:'农业银行', code:'hk01288', cies:'stock' },
+  { g:'股票', name:'中国宏桥', code:'hk01378', cies:'stock' },
+  { g:'股票', name:'邮储银行', code:'hk01658', cies:'stock' },
+  { g:'股票', name:'百威亚太', code:'hk01876', cies:'stock' },
+  { g:'股票', name:'中远海控', code:'hk01919', cies:'stock' },
+  { g:'股票', name:'金沙中国有限公司', code:'hk01928', cies:'stock' },
+  { g:'股票', name:'周大福', code:'hk01929', cies:'stock' },
+  { g:'股票', name:'理想汽车-W', code:'hk02015', cies:'stock' },
+  { g:'股票', name:'药明生物', code:'hk02269', cies:'stock' },
+  { g:'股票', name:'申洲国际', code:'hk02313', cies:'stock' },
+  { g:'股票', name:'蒙牛乳业', code:'hk02319', cies:'stock' },
+  { g:'股票', name:'李宁', code:'hk02331', cies:'stock' },
+  { g:'股票', name:'长城汽车', code:'hk02333', cies:'stock' },
+  { g:'股票', name:'药明康德', code:'hk02359', cies:'stock' },
+  { g:'股票', name:'舜宇光学科技', code:'hk02382', cies:'stock' },
+  { g:'股票', name:'中银香港', code:'hk02388', cies:'stock' },
+  { g:'股票', name:'中国人寿', code:'hk02628', cies:'stock' },
+  { g:'股票', name:'新奥能源', code:'hk02688', cies:'stock' },
+  { g:'股票', name:'紫金矿业', code:'hk02899', cies:'stock' },
+  { g:'股票', name:'招商银行', code:'hk03968', cies:'stock' },
+  { g:'股票', name:'中国银行', code:'hk03988', cies:'stock' },
+  { g:'股票', name:'京东健康', code:'hk06618', cies:'stock' },
+  { g:'股票', name:'海底捞', code:'hk06862', cies:'stock' },
+  { g:'股票', name:'哔哩哔哩-W', code:'hk09626', cies:'stock' },
+  { g:'股票', name:'农夫山泉', code:'hk09633', cies:'stock' },
+  { g:'股票', name:'蔚来-SW', code:'hk09866', cies:'stock' },
+  { g:'股票', name:'小鹏集团-W', code:'hk09868', cies:'stock' },
+  { g:'股票', name:'百度集团-SW', code:'hk09888', cies:'stock' },
+  { g:'股票', name:'携程集团-S', code:'hk09961', cies:'stock' },
+  { g:'股票', name:'泡泡玛特', code:'hk09992', cies:'stock' },
   // —— 港上市ETF(获许:合资格集体投资计划,SFC认可) ——
   { g:'ETF·公募', name:'盈富基金(恒生指数)', code:'hk02800', cies:'cis' },
   { g:'ETF·公募', name:'恒生中国企业ETF', code:'hk02828', cies:'cis' },
@@ -238,6 +314,34 @@ function addAsset(libIdx) {
   renderPortfolio();
 }
 function removeAsset(uid) { portfolio = portfolio.filter(p => p.uid !== uid); renderPortfolio(); }
+
+// 港交所全部上市股票均属 CIES 获许资产, 输代码即可添加(自动识别名称)
+async function addByCode() {
+  const inp = document.getElementById('customCode'), btn = document.getElementById('addCodeBtn');
+  const digits = inp.value.trim().replace(/^hk/i, '').replace(/\D/g, '');
+  if (!digits || digits.length > 5) { alert('请输入4~5位港股代码, 例: 6690'); return; }
+  const code = 'hk' + digits.padStart(5, '0');
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const j = await fetchJson(`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${code},day,,,3,qfq`);
+    const k = Object.keys(j.data || {})[0];
+    const name = j.data && j.data[k] && j.data[k].qt && j.data[k].qt[k] && j.data[k].qt[k][1];
+    if (!name) throw new Error('查无此代码, 确认是港交所上市代码');
+    const cies = document.getElementById('customType').value;
+    const exist = portfolio.find(p => p.code === code);
+    if (exist) { exist.amount += 100; }
+    else portfolio.push({ uid: uidSeq++, name, code, cies, amount: 100 });
+    renderPortfolio();
+    inp.value = '';
+  } catch (e) {
+    alert('添加失败: ' + (e.message || e));
+  } finally {
+    btn.disabled = false; btn.textContent = '＋';
+  }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('customCode').addEventListener('keydown', e => { if (e.key === 'Enter') addByCode(); });
+});
 function clearPortfolio() { portfolio = [{...CIESIP}]; renderPortfolio(); }
 
 function renderPortfolio() {
