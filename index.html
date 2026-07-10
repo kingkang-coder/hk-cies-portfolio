@@ -154,7 +154,7 @@
       <div class="card hidden" id="results">
         <h2>📊 回测结果
           <span class="no-print">
-            <button class="btn gold" style="padding:4px 12px;font-size:12px" onclick="exportCSV()">导出CSV</button>
+            <button class="btn gold" style="padding:4px 12px;font-size:12px" onclick="exportXLSX()">导出Excel</button>
             <button class="btn ghost" style="padding:4px 12px;font-size:12px" onclick="window.print()">打印报告</button>
           </span>
         </h2>
@@ -176,6 +176,7 @@
   </div>
 </div>
 
+<script src="xlsx.full.min.js"></script>
 <script>
 /* ================= 资产库 ================= */
 // type: market=有行情(腾讯API代码) | fixed=固定假设收益
@@ -978,24 +979,72 @@ function drawLine(id, dates, ys, opt) {
 }
 
 /* ================= 导出 ================= */
-function exportCSV() {
-  if (!lastResult) return;
+// 生成Excel工作簿(与页面展示同一套数据源 lastResult); 百分比按数值存(17.85 表示 17.85%), 便于二次计算
+function buildWorkbook() {
   const R = lastResult;
-  let csv = '﻿'; // BOM, 防止Excel打开中文乱码
-  csv += '香港新CIES投资组合回测报告\n';
-  csv += `回测区间,${R.dates[0]} ~ ${R.dates[R.dates.length-1]}\n`;
-  csv += `期初投入(万港元),${R.totalAmt}\n期末价值(万港元),${R.nav[R.nav.length-1].toFixed(1)}\n`;
-  csv += `累计收益,${fmtPct(R.cum)}\n年化收益率,${fmtPct(R.cagr)}\n年化波动率,${fmtPct(R.vol)}\n`;
-  csv += `最大回撤,${fmtPct(R.mdd)}\n最大回撤区间,${R.mddStart} → ${R.mddEnd}\n`;
-  csv += `夏普比率,${R.sharpe.toFixed(2)}\n卡玛比率,${R.calmar.toFixed(2)}\n\n`;
-  csv += '单资产表现(独立买入持有口径,不含再平衡影响)\n';
-  csv += '资产,金额(万),年化收益,累计收益,年化波动,最大回撤,期末价值(万),盈亏(万)\n';
-  R.assetPerf.forEach(a => {
-    csv += `${a.name},${a.amount},${fmtPct(a.cagr)},${fmtPct(a.cum)},${fmtPct(a.vol)},${fmtPct(a.mdd)},${a.endVal.toFixed(0)},${a.pnl.toFixed(0)}\n`;
-  });
-  csv += '\n日期,组合净值(万港元),回撤\n';
-  R.dates.forEach((d,i) => { csv += `${d},${R.nav[i].toFixed(2)},${fmtPct(R.ddSeries[i])}\n`; });
-  download(csv, `CIES组合回测_${R.dates[R.dates.length-1]}.csv`, 'text/csv');
+  const p2 = x => Math.round(x * 10000) / 100;  // 0.1785 -> 17.85
+  const n2 = x => Math.round(x * 100) / 100;
+  const wb = XLSX.utils.book_new();
+
+  const volOk = R.vol > 1e-6, mddOk = R.mdd < -1e-9;
+  const s1 = [
+    ['香港新CIES投资组合回测报告'],
+    ['生成工具', 'https://kingkang-coder.github.io/hk-cies-portfolio/'],
+    [],
+    ['回测区间', `${R.dates[0]} ~ ${R.dates[R.dates.length-1]}`],
+    ['期初投入(万港元)', R.totalAmt],
+    ['期末价值(万港元)', n2(R.nav[R.nav.length-1])],
+    ['累计收益(%)', p2(R.cum)],
+    ['年化收益率(%)', p2(R.cagr)],
+    ['年化波动率(%)', p2(R.vol)],
+    ['最大回撤(%)', p2(R.mdd)],
+    ['最大回撤区间', `${R.mddStart} → ${R.mddEnd}`],
+    ['夏普比率', volOk ? n2(R.sharpe) : '—'],
+    ['卡玛比率', mddOk ? n2(R.calmar) : '—'],
+    [],
+    ['说明'],
+    ...document.getElementById('btNote').textContent.split('\n').filter(x => x.trim()).map(x => [x])
+  ];
+  const ws1 = XLSX.utils.aoa_to_sheet(s1);
+  ws1['!cols'] = [{ wch: 18 }, { wch: 60 }];
+  XLSX.utils.book_append_sheet(wb, ws1, '组合指标');
+
+  const s2 = [
+    ['单资产表现(独立买入持有口径, 不含再平衡影响)'],
+    ['资产', '金额(万)', '年化收益(%)', '累计收益(%)', '年化波动(%)', '最大回撤(%)', '期末价值(万)', '盈亏(万)'],
+    ...R.assetPerf.map(a => [a.name, a.amount, p2(a.cagr), p2(a.cum), p2(a.vol), p2(a.mdd), n2(a.endVal), n2(a.pnl)])
+  ];
+  const ws2 = XLSX.utils.aoa_to_sheet(s2);
+  ws2['!cols'] = [{ wch: 28 }, ...Array(7).fill({ wch: 12 })];
+  XLSX.utils.book_append_sheet(wb, ws2, '单资产表现');
+
+  const s3 = [
+    ['日期', '组合净值(万港元)', '回撤(%)'],
+    ...R.dates.map((d, i) => [d, n2(R.nav[i]), p2(R.ddSeries[i])])
+  ];
+  const ws3 = XLSX.utils.aoa_to_sheet(s3);
+  ws3['!cols'] = [{ wch: 12 }, { wch: 16 }, { wch: 10 }];
+  XLSX.utils.book_append_sheet(wb, ws3, '每日净值');
+
+  const s4 = [
+    ['组合配置(可用「导出配置」JSON文件在工具中一键还原)'],
+    ['起始日期', document.getElementById('startDate').value],
+    ['再平衡', { none: '不再平衡', monthly: '每月', quarterly: '每季', yearly: '每年' }[document.getElementById('rebalance').value] || document.getElementById('rebalance').value],
+    ['无风险利率(%)', +document.getElementById('rf').value || 0],
+    [],
+    ['资产', '代码', '类别', '金额(万)', '假设年化(%)'],
+    ...portfolio.filter(p => p.amount > 0).map(p => [p.name, p.code || '', p.cies, p.amount, p.fixed != null ? p.fixed : ''])
+  ];
+  const ws4 = XLSX.utils.aoa_to_sheet(s4);
+  ws4['!cols'] = [{ wch: 30 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, ws4, '组合配置');
+  return wb;
+}
+
+function exportXLSX() {
+  if (!lastResult) { alert('请先运行回测'); return; }
+  if (typeof XLSX === 'undefined') { alert('Excel组件未加载成功, 请刷新页面重试'); return; }
+  XLSX.writeFile(buildWorkbook(), `CIES组合回测_${lastResult.dates[lastResult.dates.length-1]}.xlsx`);
 }
 function exportConfig() {
   const cfg = {
