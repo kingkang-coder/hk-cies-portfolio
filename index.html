@@ -998,7 +998,23 @@ function exportCSV() {
   download(csv, `CIES组合回测_${R.dates[R.dates.length-1]}.csv`, 'text/csv');
 }
 function exportConfig() {
-  download(JSON.stringify({ portfolio: portfolio.filter(p=>!p.locked) }, null, 2), 'CIES组合配置.json', 'application/json');
+  const cfg = {
+    '工具': '香港新CIES投资组合规划器',
+    '网址': 'https://kingkang-coder.github.io/hk-cies-portfolio/',
+    '导出时间': new Date().toLocaleString('zh-CN'),
+    '回测参数': {
+      '起始日期': document.getElementById('startDate').value,
+      '再平衡': document.getElementById('rebalance').value,
+      '无风险利率%': +document.getElementById('rf').value || 0
+    },
+    '组合': portfolio.filter(p => !p.locked).map(p => {
+      const o = { '名称': p.name, '金额万': p.amount, '类别': p.cies };
+      if (p.code) o['代码'] = p.code;
+      if (p.fixed != null) o['假设年化%'] = p.fixed;
+      return o;
+    })
+  };
+  download(JSON.stringify(cfg, null, 2), `CIES组合配置_${new Date().toLocaleDateString('sv')}.json`, 'application/json');
 }
 function importConfig(input) {
   const f = input.files[0]; if (!f) return;
@@ -1006,9 +1022,29 @@ function importConfig(input) {
   rd.onload = () => {
     try {
       const j = JSON.parse(rd.result);
-      portfolio = [{...CIESIP}, ...j.portfolio.map(p => ({...p, uid: uidSeq++}))];
+      const rows = j['组合'] || j.portfolio; // 兼容旧版配置文件
+      if (!Array.isArray(rows) || !rows.length) throw new Error('无组合数据');
+      portfolio = [{...CIESIP}, ...rows.map(r => {
+        const fx = r['假设年化%'] != null ? r['假设年化%'] : r.fixed;
+        const o = {
+          uid: uidSeq++,
+          name: r['名称'] || r.name || '未命名资产',
+          cies: r['类别'] || r.cies || 'stock',
+          amount: +(r['金额万'] != null ? r['金额万'] : r.amount) || 0
+        };
+        const code = r['代码'] || r.code;
+        if (code) o.code = code;
+        if (fx != null) o.fixed = +fx;
+        return o;
+      })];
+      const bp = j['回测参数'];
+      if (bp) {
+        if (bp['起始日期']) document.getElementById('startDate').value = bp['起始日期'];
+        if (bp['再平衡']) document.getElementById('rebalance').value = bp['再平衡'];
+        if (bp['无风险利率%'] != null) document.getElementById('rf').value = bp['无风险利率%'];
+      }
       renderPortfolio();
-    } catch(e) { alert('配置文件格式不对'); }
+    } catch(e) { alert('配置文件格式不对: ' + (e.message || e)); }
   };
   rd.readAsText(f);
   input.value = '';
