@@ -118,7 +118,7 @@
           <span class="no-print">
             <button class="btn ghost" style="padding:4px 12px;font-size:12px" onclick="exportConfig()">导出配置</button>
             <button class="btn ghost" style="padding:4px 12px;font-size:12px" onclick="document.getElementById('importFile').click()">导入配置</button>
-            <input type="file" id="importFile" class="hidden" accept=".json" onchange="importConfig(this)">
+            <input type="file" id="importFile" class="hidden" accept=".xlsx,.json" onchange="importConfig(this)">
           </span>
         </h2>
         <table id="ptable">
@@ -1046,56 +1046,90 @@ function exportXLSX() {
   if (typeof XLSX === 'undefined') { alert('Excel组件未加载成功, 请刷新页面重试'); return; }
   XLSX.writeFile(buildWorkbook(), `CIES组合回测_${lastResult.dates[lastResult.dates.length-1]}.xlsx`);
 }
+const CIES_LABELS = { stock:'股票', cis:'ETF/基金/REIT', bond:'债券', cd:'存款证', pe:'私募基金', re_nonres:'非住宅房地产', re_res:'住宅房地产' };
+const REB_LABELS = { none:'不再平衡', monthly:'每月', quarterly:'每季', yearly:'每年' };
+const lbl2key = (map, v) => Object.keys(map).find(k => map[k] === v);
+
 function exportConfig() {
-  const cfg = {
-    '工具': '香港新CIES投资组合规划器',
-    '网址': 'https://kingkang-coder.github.io/hk-cies-portfolio/',
-    '导出时间': new Date().toLocaleString('zh-CN'),
-    '回测参数': {
-      '起始日期': document.getElementById('startDate').value,
-      '再平衡': document.getElementById('rebalance').value,
-      '无风险利率%': +document.getElementById('rf').value || 0
-    },
-    '组合': portfolio.filter(p => !p.locked).map(p => {
-      const o = { '名称': p.name, '金额万': p.amount, '类别': p.cies };
-      if (p.code) o['代码'] = p.code;
-      if (p.fixed != null) o['假设年化%'] = p.fixed;
-      return o;
-    })
-  };
-  download(JSON.stringify(cfg, null, 2), `CIES组合配置_${new Date().toLocaleDateString('sv')}.json`, 'application/json');
+  if (typeof XLSX === 'undefined') { alert('Excel组件未加载成功, 请刷新页面重试'); return; }
+  const rows = [
+    ['香港新CIES投资组合规划器 — 组合配置'],
+    ['网址', 'https://kingkang-coder.github.io/hk-cies-portfolio/'],
+    ['导出时间', new Date().toLocaleString('zh-CN')],
+    ['起始日期', document.getElementById('startDate').value],
+    ['再平衡', REB_LABELS[document.getElementById('rebalance').value] || document.getElementById('rebalance').value],
+    ['无风险利率%', +document.getElementById('rf').value || 0],
+    [],
+    ['名称', '代码', '类别', '金额(万)', '假设年化%'],
+    ...portfolio.filter(p => !p.locked).map(p =>
+      [p.name, p.code || '', CIES_LABELS[p.cies] || p.cies, p.amount, p.fixed != null ? p.fixed : ''])
+  ];
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{ wch: 32 }, { wch: 10 }, { wch: 16 }, { wch: 10 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, ws, '组合配置');
+  XLSX.writeFile(wb, `CIES组合配置_${new Date().toLocaleDateString('sv')}.xlsx`);
 }
+function applyImportedAssets(assets, params) {
+  if (!assets.length) throw new Error('没有找到资产行');
+  portfolio = [{...CIESIP}, ...assets];
+  if (params.startDate) document.getElementById('startDate').value = params.startDate;
+  if (params.rebalance) document.getElementById('rebalance').value = params.rebalance;
+  if (params.rf != null) document.getElementById('rf').value = params.rf;
+  renderPortfolio();
+}
+
 function importConfig(input) {
   const f = input.files[0]; if (!f) return;
+  const isExcel = /\.xlsx?$/i.test(f.name);
   const rd = new FileReader();
   rd.onload = () => {
     try {
-      const j = JSON.parse(rd.result);
-      const rows = j['组合'] || j.portfolio; // 兼容旧版配置文件
-      if (!Array.isArray(rows) || !rows.length) throw new Error('无组合数据');
-      portfolio = [{...CIESIP}, ...rows.map(r => {
-        const fx = r['假设年化%'] != null ? r['假设年化%'] : r.fixed;
-        const o = {
-          uid: uidSeq++,
-          name: r['名称'] || r.name || '未命名资产',
-          cies: r['类别'] || r.cies || 'stock',
-          amount: +(r['金额万'] != null ? r['金额万'] : r.amount) || 0
-        };
-        const code = r['代码'] || r.code;
-        if (code) o.code = code;
-        if (fx != null) o.fixed = +fx;
-        return o;
-      })];
-      const bp = j['回测参数'];
-      if (bp) {
-        if (bp['起始日期']) document.getElementById('startDate').value = bp['起始日期'];
-        if (bp['再平衡']) document.getElementById('rebalance').value = bp['再平衡'];
-        if (bp['无风险利率%'] != null) document.getElementById('rf').value = bp['无风险利率%'];
+      if (isExcel) {
+        const wb = XLSX.read(rd.result, { type: 'array' });
+        const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
+        const params = {};
+        let headerIdx = -1;
+        aoa.forEach((r, i) => {
+          if (r[0] === '起始日期') params.startDate = String(r[1] || '').slice(0, 10);
+          if (r[0] === '再平衡') params.rebalance = lbl2key(REB_LABELS, r[1]) || r[1];
+          if (r[0] === '无风险利率%') params.rf = +r[1] || 0;
+          if (r[0] === '名称' && headerIdx < 0) headerIdx = i;
+        });
+        if (headerIdx < 0) throw new Error('缺少「名称」表头行');
+        const assets = aoa.slice(headerIdx + 1)
+          .filter(r => r[0] && (+r[3] || 0) > 0)
+          .map(r => {
+            const o = { uid: uidSeq++, name: String(r[0]), cies: lbl2key(CIES_LABELS, r[2]) || r[2] || 'stock', amount: +r[3] };
+            if (r[1]) o.code = String(r[1]).trim();
+            if (r[4] !== '' && r[4] != null) o.fixed = +r[4];
+            return o;
+          });
+        applyImportedAssets(assets, params);
+      } else {
+        // 旧版 JSON 配置兼容
+        const j = JSON.parse(rd.result);
+        const rows = j['组合'] || j.portfolio;
+        if (!Array.isArray(rows) || !rows.length) throw new Error('无组合数据');
+        const assets = rows.map(r => {
+          const fx = r['假设年化%'] != null ? r['假设年化%'] : r.fixed;
+          const o = {
+            uid: uidSeq++,
+            name: r['名称'] || r.name || '未命名资产',
+            cies: r['类别'] || r.cies || 'stock',
+            amount: +(r['金额万'] != null ? r['金额万'] : r.amount) || 0
+          };
+          const code = r['代码'] || r.code;
+          if (code) o.code = code;
+          if (fx != null) o.fixed = +fx;
+          return o;
+        });
+        const bp = j['回测参数'] || {};
+        applyImportedAssets(assets, { startDate: bp['起始日期'], rebalance: bp['再平衡'], rf: bp['无风险利率%'] });
       }
-      renderPortfolio();
     } catch(e) { alert('配置文件格式不对: ' + (e.message || e)); }
   };
-  rd.readAsText(f);
+  if (isExcel) rd.readAsArrayBuffer(f); else rd.readAsText(f);
   input.value = '';
 }
 function download(content, name, type) {
