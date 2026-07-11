@@ -98,7 +98,12 @@
           <button class="btn ghost" style="padding:6px 12px;font-size:13px" id="addCodeBtn" onclick="addByCode()">＋</button>
         </div>
         <div style="display:flex;gap:6px;margin-bottom:8px">
-          <button class="btn ghost" style="flex:1;padding:6px 10px;font-size:12px" onclick="document.getElementById('navFile').click()">📄 导入自定义净值(Excel/CSV) — 场外基金等无行情资产</button>
+          <input id="fundSearch" placeholder="搜场外基金(名称/代码), 如: 摩根太平洋" style="flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">
+          <button class="btn ghost" style="padding:6px 12px;font-size:13px" id="fundSearchBtn" onclick="searchFund()">🔍</button>
+        </div>
+        <div id="fundResults" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <button class="btn ghost" style="flex:1;padding:6px 10px;font-size:12px" onclick="document.getElementById('navFile').click()">📄 导入自定义净值(Excel/CSV) — 接口没有的资产用这个兜底</button>
           <input type="file" id="navFile" class="hidden" accept=".xlsx,.csv" onchange="importNav(this)">
         </div>
         <div class="tabs" id="tabs"></div>
@@ -627,7 +632,109 @@ async function addByCode() {
 }
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('customCode').addEventListener('keydown', e => { if (e.key === 'Enter') addByCode(); });
+  document.getElementById('fundSearch').addEventListener('keydown', e => { if (e.key === 'Enter') searchFund(); });
 });
+
+/* ============ 场外基金: 搜索+一键添加(浏览器直连天天基金接口) ============ */
+let jsonpSeq = 0;
+function jsonp(url, timeout) {
+  return new Promise((resolve, reject) => {
+    const fn = '__jp' + (jsonpSeq++);
+    const s = document.createElement('script');
+    const cleanup = () => { delete window[fn]; s.remove(); };
+    window[fn] = data => { cleanup(); resolve(data); };
+    s.onerror = () => { cleanup(); reject(new Error('基金接口加载失败')); };
+    s.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + fn;
+    document.head.appendChild(s);
+    setTimeout(() => { if (window[fn]) { cleanup(); reject(new Error('基金接口超时')); } }, timeout || 20000);
+  });
+}
+// 内地/互认基金: pingzhongdata js文件(含累计净值=含分红)
+function loadFundJs(code) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.onload = () => {
+      const name = window.fS_name;
+      let rows = [];
+      if (Array.isArray(window.Data_ACWorthTrend) && window.Data_ACWorthTrend.length > 30) {
+        rows = window.Data_ACWorthTrend.map(x => [new Date(x[0] + 12*3600*1000).toISOString().slice(0,10), +x[1]]);
+      } else if (Array.isArray(window.Data_netWorthTrend)) {
+        rows = window.Data_netWorthTrend.map(x => [new Date(x.x + 12*3600*1000).toISOString().slice(0,10), +x.y]);
+      }
+      ['fS_name','Data_ACWorthTrend','Data_netWorthTrend'].forEach(k => { try { delete window[k]; } catch {} });
+      s.remove();
+      if (!name || !rows.length) reject(new Error('未获取到该基金净值'));
+      else resolve({ name, rows: rows.filter(r => isFinite(r[1]) && r[1] > 0), note: '' });
+    };
+    s.onerror = () => { s.remove(); reject(new Error('该代码不是内地/互认基金')); };
+    s.src = 'https://fund.eastmoney.com/pingzhongdata/' + code + '.js?v=' + Date.now();
+    document.head.appendChild(s);
+  });
+}
+const jsonpRetry = async (url, timeout) => {
+  try { return await jsonp(url, timeout); }
+  catch (e) { return await jsonp(url, timeout); } // 偶发慢/丢包, 重试一次
+};
+// 香港基金频道列表(代码→内部编号): 全局只拉一次, 搜索时后台预热
+let hkFundList = null, hkListPromise = null;
+function loadHKList() {
+  if (hkFundList) return Promise.resolve(hkFundList);
+  if (!hkListPromise) {
+    hkListPromise = jsonpRetry('https://overseas.1234567.com.cn/overseasapi/OpenApiHander.ashx?api=HKFDApi&m=MethodFundList&action=1&pageindex=0&pagesize=5000&dy=1&date1=2025-01-01&date2=2026-12-31&sortfield=Y&sorttype=-1&isbuy=0', 45000)
+      .then(j => (hkFundList = j.Data || []))
+      .catch(e => { hkListPromise = null; throw e; });
+  }
+  return hkListPromise;
+}
+async function fetchFundSeries(code, catHint) {
+  const tryHK = async () => {
+    const list = await loadHKList();
+    const hit = list.find(x => x.FCODE === code);
+    if (!hit) throw new Error('香港基金频道无此代码');
+    const jz = await jsonpRetry(`https://overseas.1234567.com.cn/overseasapi/OpenApiHander.ashx?api=HKFDApi&m=MethodJZ&hkfcode=${hit.HKFCODE}&action=2&pageindex=0&pagesize=20000`, 45000);
+    const bonus = (jz.Data || []).filter(x => x.BONUS !== '' && x.BONUS != null).length;
+    const rows = (jz.Data || []).map(x => [x.PDATE, +x.NAV]).filter(r => r[0] && isFinite(r[1]) && r[1] > 0);
+    return { name: hit.SHORTNAME, rows, note: bonus > 0 ? `历史有${bonus}次分红, 净值未含分红, 收益会低估` : '' };
+  };
+  if (catHint && catHint.includes('香港基金')) return tryHK();
+  try { return await loadFundJs(code); } catch (e) { return tryHK(); }
+}
+function addFundAsset(code, catHint, btnEl) {
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '抓取净值中…'; }
+  return fetchFundSeries(code, catHint).then(({ name, rows, note }) => {
+    const map = new Map(rows);
+    const series = [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    if (series.length < 30) throw new Error('净值数据不足30条');
+    const exist = portfolio.find(p => p.fcode === code);
+    if (exist) { exist.amount += 100; renderPortfolio(); return exist; }
+    const asset = { uid: uidSeq++, name, cies: 'cis', amount: 100, custom: series, fcode: code };
+    portfolio.push(asset);
+    renderPortfolio();
+    document.getElementById('fundResults').innerHTML = '';
+    document.getElementById('fundSearch').value = '';
+    alert(`已添加「${name}」(${code})\n${series.length}个净值点: ${series[0][0]} ~ ${series[series.length-1][0]}${note ? '\n⚠️ ' + note : ''}`);
+    return asset;
+  }).catch(e => { alert('添加失败: ' + (e.message || e)); throw e; })
+    .finally(() => { if (btnEl) { btnEl.disabled = false; } });
+}
+async function searchFund() {
+  const kw = document.getElementById('fundSearch').value.trim();
+  const box = document.getElementById('fundResults');
+  if (!kw) return;
+  loadHKList().catch(() => {}); // 后台预热香港名单, 添加时不用再等
+  box.innerHTML = '<div class="foot">搜索中…</div>';
+  try {
+    const j = await jsonp('https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx?m=10&key=' + encodeURIComponent(kw));
+    const cands = (j.Datas || []).map(x => ({ code: x.CODE, name: x.NAME, cat: x.CATEGORYDESC || '基金' }))
+      .filter(x => /^\d{6}$/.test(x.code)).slice(0, 8);
+    if (!cands.length) { box.innerHTML = '<div class="foot">没搜到, 换个关键词(支持内地基金/互认基金/天天基金香港频道173只)</div>'; return; }
+    box.innerHTML = cands.map(c =>
+      `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border:1px solid var(--line);border-radius:8px;margin-bottom:4px;font-size:12px">
+        <span>${c.name} <span class="foot">${c.code} · ${c.cat}</span></span>
+        <button class="btn ghost" style="padding:3px 10px;font-size:12px" onclick="addFundAsset('${c.code}','${c.cat}',this)">＋添加</button>
+      </div>`).join('');
+  } catch (e) { box.innerHTML = '<div class="foot">搜索失败: ' + (e.message || e) + '</div>'; }
+}
 
 // 导入自定义净值序列(场外基金/任何无公开行情的资产): 第一列日期, 第二列净值
 function normNavDate(v) {
@@ -1106,7 +1213,7 @@ function exportConfig() {
     [],
     ['名称', '代码', '类别', '金额(万)', '假设年化%'],
     ...portfolio.filter(p => !p.locked).map(p =>
-      [p.name, p.code || '', p.custom ? '自定义净值' : (CIES_LABELS[p.cies] || p.cies), p.amount, p.fixed != null ? p.fixed : ''])
+      [p.name, p.code || p.fcode || '', p.fcode ? '场外基金' : (p.custom ? '自定义净值' : (CIES_LABELS[p.cies] || p.cies)), p.amount, p.fixed != null ? p.fixed : ''])
   ];
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -1115,7 +1222,6 @@ function exportConfig() {
   XLSX.writeFile(wb, `CIES组合配置_${new Date().toLocaleDateString('sv')}.xlsx`);
 }
 function applyImportedAssets(assets, params) {
-  if (!assets.length) throw new Error('没有找到资产行');
   portfolio = [{...CIESIP}, ...assets];
   if (params.startDate) document.getElementById('startDate').value = params.startDate;
   if (params.rebalance) document.getElementById('rebalance').value = params.rebalance;
@@ -1142,21 +1248,36 @@ function importConfig(input) {
         });
         if (headerIdx < 0) throw new Error('缺少「名称」表头行');
         const customSkipped = aoa.slice(headerIdx + 1).filter(r => r[0] && r[2] === '自定义净值').map(r => r[0]);
+        const fundRows = aoa.slice(headerIdx + 1).filter(r => r[0] && r[2] === '场外基金' && r[1] && (+r[3] || 0) > 0);
         const assets = aoa.slice(headerIdx + 1)
-          .filter(r => r[0] && (+r[3] || 0) > 0 && r[2] !== '自定义净值')
+          .filter(r => r[0] && (+r[3] || 0) > 0 && r[2] !== '自定义净值' && r[2] !== '场外基金')
           .map(r => {
             const o = { uid: uidSeq++, name: String(r[0]), cies: lbl2key(CIES_LABELS, r[2]) || r[2] || 'stock', amount: +r[3] };
             if (r[1]) o.code = String(r[1]).trim();
             if (r[4] !== '' && r[4] != null) o.fixed = +r[4];
             return o;
           });
+        if (!assets.length && !fundRows.length) throw new Error('没有找到资产行');
         applyImportedAssets(assets, params);
         if (customSkipped.length) alert(`提示: ${customSkipped.join('、')} 是自定义净值资产, 配置文件不含其净值数据, 请用「导入自定义净值」重新加入`);
+        // 场外基金: 按代码重新拉净值还原
+        (async () => {
+          const failed = [];
+          for (const r of fundRows) {
+            try {
+              const { name, rows } = await fetchFundSeries(String(r[1]).trim());
+              const series = [...new Map(rows).entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+              portfolio.push({ uid: uidSeq++, name, cies: 'cis', amount: +r[3], custom: series, fcode: String(r[1]).trim() });
+            } catch (e) { failed.push(r[0]); }
+          }
+          if (fundRows.length) renderPortfolio();
+          if (failed.length) alert(`这些场外基金净值拉取失败, 未还原: ${failed.join('、')}`);
+        })();
       } else {
         // 旧版 JSON 配置兼容
         const j = JSON.parse(rd.result);
         const rows = j['组合'] || j.portfolio;
-        if (!Array.isArray(rows) || !rows.length) throw new Error('无组合数据');
+        if (!Array.isArray(rows) || !rows.length) throw new Error('没有找到资产行');
         const assets = rows.map(r => {
           const fx = r['假设年化%'] != null ? r['假设年化%'] : r.fixed;
           const o = {
