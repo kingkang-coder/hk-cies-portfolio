@@ -715,7 +715,7 @@ function addFundAsset(code, catHint, btnEl) {
     alert(`已添加「${name}」(${code})\n${series.length}个净值点: ${series[0][0]} ~ ${series[series.length-1][0]}${note ? '\n⚠️ ' + note : ''}`);
     return asset;
   }).catch(e => { alert('添加失败: ' + (e.message || e)); throw e; })
-    .finally(() => { if (btnEl) { btnEl.disabled = false; } });
+    .finally(() => { if (btnEl) { btnEl.disabled = false; btnEl.textContent = '＋ 添加'; } });
 }
 async function searchFund() {
   const kw = document.getElementById('fundSearch').value.trim();
@@ -811,12 +811,34 @@ function renderCompliance(total) {
 /* ================= 资产库渲染 ================= */
 let curTab = '全部';
 function renderTabs() {
-  const gs = ['全部', ...new Set(LIBRARY.map(a=>a.g))];
+  const gs = ['全部', ...new Set(LIBRARY.map(a=>a.g)), '场外基金'];
   document.getElementById('tabs').innerHTML = gs.map(g =>
     `<button class="${g===curTab?'on':''}" onclick="curTab='${g}';renderTabs();renderLib()">${g}</button>`).join('');
 }
 function renderLib() {
   const q = document.getElementById('search').value.trim().toLowerCase();
+  // 场外基金: 动态列表(天天基金香港频道), 首次点开时加载
+  if (curTab === '场外基金') {
+    const box = document.getElementById('lib');
+    if (!hkFundList) {
+      box.innerHTML = '<div class="foot" style="padding:12px">⏳ 正在加载香港基金列表(首次约5-15秒)…</div>';
+      loadHKList().then(() => { if (curTab === '场外基金') renderLib(); })
+        .catch(e => { box.innerHTML = `<div class="foot" style="padding:12px">列表加载失败: ${e.message || e} <button class="btn ghost" style="padding:2px 10px" onclick="renderLib()">重试</button></div>`; });
+      return;
+    }
+    const items = hkFundList.filter(f =>
+      !q || (f.SHORTNAME || '').toLowerCase().includes(q) || (f.FULLNAME || '').toLowerCase().includes(q) || (f.FCODE || '').includes(q));
+    box.innerHTML = `<div class="foot" style="padding:4px 2px 8px">天天基金香港频道 ${hkFundList.length} 只(按近1年收益排序) · 内地/互认基金请用上方"搜场外基金" · 分红型基金净值不含分红,添加时会提示</div>` +
+      (items.map(f => `
+      <div class="lib-item">
+        <div>
+          <div class="nm">${f.SHORTNAME} <span class="cd">${f.FCODE}</span></div>
+          <div class="cd"><span class="tag">集体投资计划</span> <span class="note">${f.CURRENCY || ''} · 近1年 ${f.Y != null ? (+f.Y).toFixed(1) + '%' : '—'} · 净值日 ${f.JZRQ || ''}</span></div>
+        </div>
+        <button onclick="addFundAsset('${f.FCODE}','香港基金',this)">＋ 添加</button>
+      </div>`).join('') || '<div class="foot" style="padding:12px">没有匹配的基金</div>');
+    return;
+  }
   document.getElementById('lib').innerHTML = LIBRARY.map((a,i) => ({a,i}))
     .filter(({a}) => (curTab==='全部'||a.g===curTab) && (!q || a.name.toLowerCase().includes(q) || (a.code||'').includes(q)))
     .map(({a,i}) => `
