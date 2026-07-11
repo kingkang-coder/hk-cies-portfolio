@@ -97,6 +97,10 @@
           </select>
           <button class="btn ghost" style="padding:6px 12px;font-size:13px" id="addCodeBtn" onclick="addByCode()">＋</button>
         </div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <button class="btn ghost" style="flex:1;padding:6px 10px;font-size:12px" onclick="document.getElementById('navFile').click()">📄 导入自定义净值(Excel/CSV) — 场外基金等无行情资产</button>
+          <input type="file" id="navFile" class="hidden" accept=".xlsx,.csv" onchange="importNav(this)">
+        </div>
         <div class="tabs" id="tabs"></div>
         <div class="lib" id="lib"></div>
       </div>
@@ -624,6 +628,38 @@ async function addByCode() {
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('customCode').addEventListener('keydown', e => { if (e.key === 'Enter') addByCode(); });
 });
+
+// 导入自定义净值序列(场外基金/任何无公开行情的资产): 第一列日期, 第二列净值
+function normNavDate(v) {
+  if (v instanceof Date && !isNaN(v)) return new Date(v.getTime() + 12 * 3600 * 1000).toISOString().slice(0, 10);
+  const m = String(v).trim().replace(/[./年月]/g, '-').replace(/日/, '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : null;
+}
+function importNav(input) {
+  const f = input.files[0]; if (!f) return;
+  if (typeof XLSX === 'undefined') { alert('Excel组件未加载成功, 请刷新页面重试'); input.value = ''; return; }
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const wb = XLSX.read(rd.result, { type: 'array', cellDates: true });
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
+      const rows = [];
+      for (const r of aoa) {
+        const d = normNavDate(r[0]), v = +r[1];
+        if (d && isFinite(v) && v > 0) rows.push([d, v]);
+      }
+      const map = new Map(rows);
+      const series = [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+      if (series.length < 30) throw new Error(`有效数据只有${series.length}行(需≥30)。格式要求: 第一列日期, 第二列净值, 可带表头`);
+      const name = f.name.replace(/\.(xlsx|csv)$/i, '');
+      portfolio.push({ uid: uidSeq++, name, cies: 'cis', amount: 100, custom: series });
+      renderPortfolio();
+      alert(`已添加「${name}」\n${series.length} 个净值点: ${series[0][0]} ~ ${series[series.length - 1][0]}\n类别按「集体投资计划」计入合规检查`);
+    } catch (e) { alert('净值文件解析失败: ' + (e.message || e)); }
+  };
+  rd.readAsArrayBuffer(f);
+  input.value = '';
+}
 function clearPortfolio() { portfolio = [{...CIESIP}]; renderPortfolio(); }
 
 function renderPortfolio() {
@@ -789,15 +825,23 @@ async function runBacktest() {
   emCircuitOpen = false; // 每轮回测重新尝试主行情源
 
   try {
-    // 1) 拉行情
-    const marketAssets = assets.filter(a => a.code);
+    // 1) 拉行情(自定义净值资产直接用导入的序列)
+    const skey = a => a.code || ('custom_' + a.uid);
+    const marketAssets = assets.filter(a => a.code || a.custom);
     const seriesMap = {};
     const degraded = [];
     for (let i = 0; i < marketAssets.length; i++) {
-      st.textContent = `拉取行情 ${i+1}/${marketAssets.length}: ${marketAssets[i].name}…`;
-      const { rows, src } = await fetchSeries(marketAssets[i].code, start);
-      seriesMap[marketAssets[i].code] = rows;
-      if (src === 'tx') degraded.push(marketAssets[i].name);
+      const a = marketAssets[i];
+      if (a.custom) {
+        const rows = a.custom.filter(r => r[0] >= start);
+        if (rows.length < 10) throw new Error(`${a.name}: 起始日期之后的净值数据不足(${rows.length}条)`);
+        seriesMap[skey(a)] = rows;
+        continue;
+      }
+      st.textContent = `拉取行情 ${i+1}/${marketAssets.length}: ${a.name}…`;
+      const { rows, src } = await fetchSeries(a.code, start);
+      seriesMap[skey(a)] = rows;
+      if (src === 'tx') degraded.push(a.name);
     }
     st.textContent = '计算中…';
 
@@ -809,12 +853,12 @@ async function runBacktest() {
       Object.values(seriesMap).forEach(rows => rows.forEach(r => set.add(r[0])));
       dates = [...set].sort();
       // 从所有资产都有数据的那天开始; 记下哪些资产历史不足(上市晚于回测起点45天以上)
-      const firstCommon = marketAssets.map(a => seriesMap[a.code][0][0]).sort().pop();
+      const firstCommon = marketAssets.map(a => seriesMap[skey(a)][0][0]).sort().pop();
       dates = dates.filter(d => d >= firstCommon);
       const tol = new Date(start); tol.setDate(tol.getDate() + 45);
       const tolStr = tol.toISOString().slice(0, 10);
       for (const a of marketAssets) {
-        const first = seriesMap[a.code][0][0];
+        const first = seriesMap[skey(a)][0][0];
         if (first > tolStr) lateAssets.push(`${a.name}(数据始于${first})`);
       }
     } else {
@@ -827,8 +871,8 @@ async function runBacktest() {
 
     // 3) 每个资产的价格序列(定收益资产: (1+r)^(天数/365))
     const px = assets.map(a => {
-      if (a.code) {
-        const rows = seriesMap[a.code];
+      if (a.code || a.custom) {
+        const rows = seriesMap[skey(a)];
         let j = 0, last = null;
         return dates.map(d => {
           while (j < rows.length && rows[j][0] <= d) { last = rows[j][1]; j++; }
@@ -1062,7 +1106,7 @@ function exportConfig() {
     [],
     ['名称', '代码', '类别', '金额(万)', '假设年化%'],
     ...portfolio.filter(p => !p.locked).map(p =>
-      [p.name, p.code || '', CIES_LABELS[p.cies] || p.cies, p.amount, p.fixed != null ? p.fixed : ''])
+      [p.name, p.code || '', p.custom ? '自定义净值' : (CIES_LABELS[p.cies] || p.cies), p.amount, p.fixed != null ? p.fixed : ''])
   ];
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -1097,8 +1141,9 @@ function importConfig(input) {
           if (r[0] === '名称' && headerIdx < 0) headerIdx = i;
         });
         if (headerIdx < 0) throw new Error('缺少「名称」表头行');
+        const customSkipped = aoa.slice(headerIdx + 1).filter(r => r[0] && r[2] === '自定义净值').map(r => r[0]);
         const assets = aoa.slice(headerIdx + 1)
-          .filter(r => r[0] && (+r[3] || 0) > 0)
+          .filter(r => r[0] && (+r[3] || 0) > 0 && r[2] !== '自定义净值')
           .map(r => {
             const o = { uid: uidSeq++, name: String(r[0]), cies: lbl2key(CIES_LABELS, r[2]) || r[2] || 'stock', amount: +r[3] };
             if (r[1]) o.code = String(r[1]).trim();
@@ -1106,6 +1151,7 @@ function importConfig(input) {
             return o;
           });
         applyImportedAssets(assets, params);
+        if (customSkipped.length) alert(`提示: ${customSkipped.join('、')} 是自定义净值资产, 配置文件不含其净值数据, 请用「导入自定义净值」重新加入`);
       } else {
         // 旧版 JSON 配置兼容
         const j = JSON.parse(rd.result);
