@@ -88,6 +88,26 @@
     <div>
       <div class="card no-print">
         <h2>📚 获许资产库 <span style="font-weight:normal;font-size:12px;color:var(--muted)">点击添加到组合</span></h2>
+        <div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600;margin-bottom:6px">🤖 一键生成合规组合(确定性求解, 非AI瞎猜)</div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px">
+            <select id="genRisk" style="padding:5px;border:1px solid var(--line);border-radius:8px;font-size:12px">
+              <option value="稳健">稳健</option><option value="平衡" selected>平衡</option><option value="进取">进取</option>
+            </select>
+            <label><input type="checkbox" id="exPe"> 不要私募</label>
+            <label><input type="checkbox" id="exStock"> 不要个股</label>
+            <label><input type="checkbox" id="exRe"> 不要房产</label>
+            <button class="btn ghost" style="padding:5px 12px;font-size:12px;margin-left:auto" onclick="genPlan(this)">生成方案</button>
+          </div>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600;margin-bottom:6px">📜 政策速查(只显示官方原文, 零AI生成)</div>
+          <div style="display:flex;gap:6px">
+            <input id="policyQ" placeholder="如: 投资亏损要补钱吗 / 多久拿永居" style="flex:1;padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:12px">
+            <button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="policySearch()">查</button>
+          </div>
+          <div id="policyResults" style="margin-top:6px"></div>
+        </div>
         <input id="search" placeholder="搜索名称或代码…">
         <div style="display:flex;gap:6px;margin-bottom:8px">
           <input id="customCode" placeholder="库里没有?输代码加任意港股, 例: 6690" style="flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">
@@ -633,6 +653,86 @@ async function addByCode() {
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('customCode').addEventListener('keydown', e => { if (e.key === 'Enter') addByCode(); });
   document.getElementById('fundSearch').addEventListener('keydown', e => { if (e.key === 'Enter') searchFund(); });
+});
+
+/* ============ 一键生成合规组合(确定性求解器, 与本地agent同一模块) ============ */
+// 求解器输出的资产类别 → 工具资产库的代表性资产
+const CLASS_TO_ASSET = {
+  stock:    [{ name: '腾讯控股', code: 'hk00700', cies: 'stock' }, { name: '汇丰控股', code: 'hk00005', cies: 'stock' }],
+  eq_etf:   [{ name: '盈富基金(恒生指数)', code: 'hk02800', cies: 'cis' }],
+  bond_etf: [{ name: 'ABF港债指数基金', code: 'hk02819', cies: 'cis' }],
+  gov_bond: [{ name: '政府债券/iBond/绿债(假设)', fixed: 4.0, cies: 'bond' }],
+  corp_bond:[{ name: '港上市公司债(假设)', fixed: 5.0, cies: 'bond' }],
+  cd:       [{ name: '存款证CD(假设,上限300万)', fixed: 3.8, cies: 'cd' }],
+  gold:     [{ name: 'SPDR金ETF', code: 'hk02840', cies: 'cis' }],
+  reit:     [{ name: '领展房产基金', code: 'hk00823', cies: 'cis' }],
+  pe:       [{ name: '私募基金OFC/LPF(假设,上限1000万)', fixed: 8.0, cies: 'pe' }],
+  re_nonres:[{ name: '非住宅房地产(假设)', fixed: 3.0, cies: 're_nonres' }],
+  re_res:   [{ name: '住宅房地产(假设,计入上限1000万)', fixed: 2.0, cies: 're_res' }],
+};
+async function genPlan(btn) {
+  btn.disabled = true;
+  try {
+    const { solve } = await import('./solve.mjs');
+    const constraints = [];
+    if (document.getElementById('exPe').checked) constraints.push({ kind: 'exclude', class: 'pe' });
+    if (document.getElementById('exStock').checked) constraints.push({ kind: 'exclude', class: 'stock' });
+    if (document.getElementById('exRe').checked) { constraints.push({ kind: 'exclude', class: 're_nonres' }); constraints.push({ kind: 'exclude', class: 're_res' }); }
+    const r = solve({ riskLevel: document.getElementById('genRisk').value, constraints });
+    if (!r.feasible) { alert('无法生成合规方案:\n' + (r.reasons || []).join('\n')); return; }
+    const items = [];
+    for (const [cls, amt] of Object.entries(r.allocation)) {
+      if (cls === 'ip' || amt <= 0) continue;
+      const defs = CLASS_TO_ASSET[cls];
+      if (!defs) continue;
+      const per = Math.round(amt / defs.length);
+      defs.forEach((d, i) => items.push({ ...d, uid: uidSeq++, amount: i === defs.length - 1 ? amt - per * (defs.length - 1) : per }));
+    }
+    portfolio = [{ ...CIESIP }, ...items];
+    renderPortfolio();
+    alert(`已生成「${r.explain[0]}」的合规组合(代表性资产, 可自行替换同类)。\n点「运行回测」看历史表现。`);
+  } catch (e) { alert('生成失败: ' + (e.message || e)); }
+  finally { btn.disabled = false; }
+}
+
+/* ============ 政策速查: BM25检索官方原文(零AI生成, 零幻觉) ============ */
+let POLICY = null;
+async function loadPolicy() {
+  if (POLICY) return POLICY;
+  const { chunks } = await (await fetch('./corpus.json')).json();
+  const bigrams = s => { const t = s.replace(/[\s,。;:、!?()()「」""'']/g, ''); const o = []; for (let i = 0; i < t.length - 1; i++) o.push(t.slice(i, i + 2)); return o; };
+  const docs = chunks.map(c => bigrams(c.text + ' ' + (c.keywords || '')));
+  const df = new Map();
+  docs.forEach(d => new Set(d).forEach(g => df.set(g, (df.get(g) || 0) + 1)));
+  const avg = docs.reduce((s, d) => s + d.length, 0) / docs.length;
+  POLICY = { chunks, docs, df, avg, bigrams };
+  return POLICY;
+}
+async function policySearch() {
+  const q = document.getElementById('policyQ').value.trim();
+  const box = document.getElementById('policyResults');
+  if (!q) return;
+  box.innerHTML = '<div class="foot">检索中…</div>';
+  try {
+    const P = await loadPolicy();
+    const qg = [...new Set(P.bigrams(q))], k1 = 1.5, b = 0.75, N = P.docs.length;
+    const top = P.docs.map((d, i) => {
+      const tf = new Map(); d.forEach(g => tf.set(g, (tf.get(g) || 0) + 1));
+      let s = 0;
+      for (const g of qg) { const n = P.df.get(g); if (!n) continue; const f = tf.get(g) || 0; s += Math.log((N - n + 0.5) / (n + 0.5) + 1) * (f * (k1 + 1)) / (f + k1 * (1 - b + b * d.length / P.avg)); }
+      return { i, s };
+    }).sort((a, x) => x.s - a.s).slice(0, 3).filter(x => x.s >= 4);
+    if (!top.length) { box.innerHTML = '<div class="foot">政策库里没有足够相关的内容。建议查官网 newcies.gov.hk 或咨询持牌中介。</div>'; return; }
+    box.innerHTML = top.map(({ i }) => { const c = P.chunks[i]; return `
+      <div style="border:1px solid var(--line);border-radius:8px;padding:7px 9px;margin-top:5px;font-size:12px">
+        <div style="font-weight:600">${c.section}</div>
+        <div style="margin:4px 0;white-space:pre-wrap">${c.text.length > 280 ? c.text.slice(0, 280) + '…' : c.text}</div>
+        <div class="foot">${c.doc} · ${c.version} · <a href="${c.url}" target="_blank">官方原文↗</a></div>
+      </div>`; }).join('');
+  } catch (e) { box.innerHTML = '<div class="foot">检索失败: ' + (e.message || e) + '</div>'; }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('policyQ').addEventListener('keydown', e => { if (e.key === 'Enter') policySearch(); });
 });
 
 /* ============ 场外基金: 搜索+一键添加(浏览器直连天天基金接口) ============ */
