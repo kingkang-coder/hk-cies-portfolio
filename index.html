@@ -723,7 +723,8 @@ async function policySearch() {
       return { i, s };
     }).sort((a, x) => x.s - a.s).slice(0, 3).filter(x => x.s >= 4);
     if (!top.length) { box.innerHTML = '<div class="foot">政策库里没有足够相关的内容。建议查官网 newcies.gov.hk 或咨询持牌中介。</div>'; return; }
-    box.innerHTML = top.map(({ i }) => { const c = P.chunks[i]; return `
+    const note = '<div class="foot" style="margin-top:5px">检索结果=字面最相关的官方原文, 不代表一定回答了你的问题, 请自行核对;拿不准以官网及持牌中介为准。</div>';
+    box.innerHTML = note + top.map(({ i }) => { const c = P.chunks[i]; return `
       <div style="border:1px solid var(--line);border-radius:8px;padding:7px 9px;margin-top:5px;font-size:12px">
         <div style="font-weight:600">${c.section}</div>
         <div style="margin:4px 0;white-space:pre-wrap">${c.text.length > 280 ? c.text.slice(0, 280) + '…' : c.text}</div>
